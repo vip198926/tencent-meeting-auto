@@ -1,0 +1,5 @@
+# 凭证文件（绝不进仓库；由 workflow 从 Secrets 注入到 $RUNNER_TEMP）
+auth_state.json
+ima_creds.json
+node_modules/
+*.log

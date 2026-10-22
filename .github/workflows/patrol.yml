@@ -1,0 +1,54 @@
+name: 会议转写-巡检补跑
+
+on:
+  schedule:
+    - cron: '36 19 * * *'   # 北京时间 03:36 = UTC 前一天 19:36
+  workflow_dispatch:
+
+# 仅授予本工作流推送状态文件所需的最小权限
+permissions:
+  contents: write
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CTM_AUTH_STATE: ${{ runner.temp }}/auth_state.json   # 登录态写到仓库之外的临时目录
+      IMA_CLIENT_ID: ${{ secrets.IMA_CLIENT_ID }}
+      IMA_API_KEY: ${{ secrets.IMA_API_KEY }}
+      WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 写入登录态（Secret -> 临时目录，绝不进仓库）
+        env:
+          CTM_AUTH_STATE_RAW: ${{ secrets.CTM_AUTH_STATE_RAW }}
+        run: |
+          printf '%s' "$CTM_AUTH_STATE_RAW" > "$CTM_AUTH_STATE"
+          echo "auth_state.json 字节数: $(wc -c < "$CTM_AUTH_STATE")"
+
+      - name: 运行巡检（增量 + 始终推送通知）
+        run: node run.js inc
+
+      - name: 提交状态文件（仅去重记录/进度，非敏感）
+        if: always()
+        run: |
+          git config user.email "ctm-bot@users.noreply.github.com"
+          git config user.name "ctm-bot"
+          git pull --rebase origin "${GITHUB_REF_NAME}" || true
+          git add daily/
+          git diff --cached --quiet || git commit -m "chore(state): update $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push
+
+      - name: 清理临时凭证
+        if: always()
+        run: rm -f "$CTM_AUTH_STATE"
