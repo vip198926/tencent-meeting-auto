@@ -57,9 +57,9 @@ jobs:
         run: |
           git config user.email "ctm-bot@users.noreply.github.com"
           git config user.name "ctm-bot"
-          git pull --rebase origin "${GITHUB_REF_NAME}" || true
           git add daily/
           git diff --cached --quiet || git commit -m "chore(state): update $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git pull --rebase origin "${GITHUB_REF_NAME}" || true
           git push
 
       - name: 清理临时凭证
