@@ -185,6 +185,33 @@ PAT 安全属性（设置时即遵循）：仅 `repo` 权限、7 天过期；用
 
 ---
 
+## 12. PAT 撤销操作指引（分步）
+
+> 目标 PAT：`<REVOKED_CLASSIC_PAT>`（classic，仅授予 `repo` 权限、7 天过期）
+> 用途：仅用于一次性把 4 个 Secret 加密写入仓库，**使命已完成，必须撤销**。
+
+**撤销步骤（GitHub 网页）**：
+1. 打开 https://github.com 并登录（即该 PAT 所属的账号）。
+2. 右上角头像 → **Settings**（设置）。
+3. 左侧菜单最底部 → **Developer settings**（开发者设置）。
+4. 进入 **Personal access tokens** → **Tokens (classic)**。
+5. 在列表中找到以 `ghp_tPrI…` 开头的 token（Note 可能是自定义名称或空）。
+6. 点击该行最右侧的 **⋯**（或 **Delete**）→ 在确认框**再次输入 `<REVOKED_CLASSIC_PAT>`** 确认删除。
+7. 删除后回到列表，确认该 token 已不在。
+
+**撤销后影响（均无负面影响）**：
+- ✅ GitHub Actions 正常运行：后续全部走内置 `GITHUB_TOKEN`，**不依赖**该 PAT。
+- ✅ 已写入的 4 个 Secrets 不受影响：Secrets 已落地仓库，与 PAT 生命周期无关。
+- ✅ 云端版不受影响：定时器已关闭，且不依赖该 PAT。
+
+**验证撤销成功**：
+- Tokens (classic) 列表已无该 token。
+- 在 GitHub → Actions 手动触发一次 `patrol` 或 `daily`（workflow_dispatch），确认仍能正常跑通 → 证明系统不依赖该 PAT。
+
+**安全属性回顾**：该 PAT 设置时即遵循最小权限（仅 `repo`、7 天过期）。即便忘记手动撤销，7 天后也会自动失效；立即手动撤销可进一步缩小暴露窗口。
+
+---
+
 ## 附：关键时间线（2026-10-22）
 
 - 基线对齐 `last_progress` = 1792681565（北京 10:46）
@@ -193,4 +220,5 @@ PAT 安全属性（设置时即遵循）：仅 `repo` 权限、7 天过期；用
 - 手动 dispatch patrol 验证通过（续期/通知/状态回写均 OK）
 - 云端版关闭定时器并重新发布（URL 不变）
 - 清理临时产物（cloud_state*.json、cloud_health*.json 等）
-- **待办**：用户到 GitHub 撤销 classic PAT `<REVOKED_CLASSIC_PAT>`
+- RUNBOOK 入仓（commit `cfd8357`）；PAT 撤销分步指引见 §12
+- **待办**：用户按 §12 到 GitHub 撤销 classic PAT `<REVOKED_CLASSIC_PAT>`
