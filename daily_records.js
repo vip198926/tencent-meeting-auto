@@ -26,6 +26,12 @@ const { fetchTranscript } = require('./ctm_fetch');
 const { uploadMarkdown } = require('./ima_upload');
 const { pushDailyReport: pushWecom } = require('./wecom_webhook');
 const { pushDailyReport: pushPushplus } = require('./pushplus');
+const { tokenRemainingDays } = require('./token_refresh');
+
+// 登录态剩余天数（失败返回 null，不阻断主流程）
+function safeTokenDays() {
+  try { const d = tokenRemainingDays(AUTH_PATH); return typeof d === 'number' ? Math.round(d * 10) / 10 : null; } catch { return null; }
+}
 
 /** 推送日报：优先企业微信机器人，其次 PushPlus；两者都未配置则静默跳过 */
 async function notify(summary) {
@@ -280,10 +286,12 @@ async function runIncremental(opts = {}) {
   log(`[INC] 报告：${path.join(OUT_DIR, `records_${tag}.md`)}`);
 
   const summary = {
+    source: opts.source || 'inc',
     date: bjDateString(0), meetings: meetings.length,
     ok: stats.ok, fail: stats.fail, skipped: stats.skipped, noRecord: stats.noRecord,
     window: { from: Math.floor(windowStart / 1000), to: Math.floor(now / 1000) },
     stale_hours: Math.round(staleMs / 3600000), md, lines: stats.lines,
+    token_remaining_days: safeTokenDays(),
   };
   if (opts.notify !== false) {
     try {
@@ -318,7 +326,7 @@ async function runDaily(targetDate, opts = {}) {
   log(`\n[DAILY] 完成：✅ ${stats.ok} | ❌ ${stats.fail} | ⏭️ ${stats.skipped} | 无录制 ${stats.noRecord} 场`);
   log(`[DAILY] 报告：${path.join(OUT_DIR, `records_${target}.md`)}`);
 
-  const summary = { date: target, meetings: dayMeetings.length, ok: stats.ok, fail: stats.fail, skipped: stats.skipped, noRecord: stats.noRecord, md, lines: stats.lines };
+  const summary = { source: opts.source || 'daily', date: target, meetings: dayMeetings.length, ok: stats.ok, fail: stats.fail, skipped: stats.skipped, noRecord: stats.noRecord, md, lines: stats.lines, token_remaining_days: safeTokenDays() };
   if (opts.notify !== false) {
     try {
       const r = await notify(summary);

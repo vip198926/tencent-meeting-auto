@@ -53,17 +53,33 @@ async function sendText(content) {
   throw new Error('企业微信返回: ' + (r.body || '').slice(0, 200));
 }
 
-/** 每日管线日报推送（纯文本，规避 markdown 兼容问题） */
+/** 每日管线 / 巡检 推送（纯文本，规避 markdown 兼容问题）
+ *  source === 'patrol' 时渲染为「巡检简报」，并附登录态剩余天数 + 积压/超时预警；
+ *  其余情况渲染为「日报」。两者标题与字段明显区分。
+ */
 async function pushDailyReport(summary) {
-  const { date, meetings, ok, fail, skipped, noRecord, error, lines } = summary;
+  const { date, meetings, ok, fail, skipped, noRecord, error, lines, source, token_remaining_days, stale_hours } = summary;
+  const isPatrol = source === 'patrol';
   let content;
   if (error) {
     content = `⚠️ 会议转写 ${date} 执行失败\n错误：${error}\n请检查登录态：本机运行 sync_auth.bat 刷新同步。`;
   } else {
-    const head = `📋 会议转写日报 ${date}\n共 ${meetings} 场会\n✅ 成功上传：${ok} 条\n❌ 失败：${fail} 条\n⏭️ 已上传跳过：${skipped} 条\n⬜ 无录制/转写：${noRecord} 场`;
+    const head = (isPatrol ? `🔍 会议转写巡检简报 ${date}` : `📋 会议转写日报 ${date}`)
+      + `\n共 ${meetings} 场会\n✅ 成功上传：${ok} 条\n❌ 失败：${fail} 条\n⏭️ 已上传跳过：${skipped} 条\n⬜ 无录制/转写：${noRecord} 场`;
+    const extra = [];
+    if (typeof token_remaining_days === 'number') extra.push(`🔑 登录态剩余约 ${token_remaining_days} 天`);
+    if (isPatrol) {
+      if (typeof stale_hours === 'number') extra.push(`⏱️ 距上次处理 ${stale_hours} 小时`);
+      const alerts = [];
+      if (typeof token_remaining_days === 'number' && token_remaining_days < 2) alerts.push('登录态即将失效(<2天)，请尽快 sync_auth.bat 续期');
+      if (typeof stale_hours === 'number' && stale_hours > 26) alerts.push(`距上次处理已达 ${stale_hours}h，疑似漏跑/积压`);
+      if (alerts.length) extra.push(`⚠️ 预警：${alerts.join('；')}`);
+    }
     // 明细取前 12 行，避免超长
     const detail = (lines || []).filter(Boolean).slice(0, 12).map(l => l.replace(/^\|\s*/, '').replace(/\s*\|\s*$/, ''));
-    content = head + (detail.length ? `\n\n—— 明细 ——\n${detail.join('\n')}` : '');
+    content = head
+      + (extra.length ? '\n' + extra.join('\n') : '')
+      + (detail.length ? `\n\n—— 明细 ——\n${detail.join('\n')}` : '');
   }
   return sendText(content);
 }

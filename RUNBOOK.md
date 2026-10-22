@@ -83,6 +83,12 @@ GitHub Actions 的 cron 为 **UTC**，已换算：
 
 > 09:36 主线的设计依据：用户会议多在 9 点前结束，09:36 正好处理「今早的会」，**增量模式**不再按天补跑昨天。
 
+**推送内容区分（巡检 vs 管线）**：两个 workflow 都经 `run.js inc` → `runIncremental`，历史上推送内容完全相同。已在 `run.js` 注入 `SOURCE` 环境变量（`patrol` / `daily`），透传到 `summary.source`：
+- **巡检（03:36, `SOURCE=patrol`）**：标题 `🔍 会议转写巡检简报`，除常规计数外**额外带**：登录态剩余天数（`🔑 登录态剩余约 X 天`）、距上次处理小时数（`⏱️ 距上次处理 X 小时`），并在 `token<2天` 或 `stale>26h` 时附 `⚠️ 预警`（登录态即将失效 / 疑似漏跑积压）。
+- **管线（09:36, `SOURCE=daily`）**：标题 `📋 会议转写日报`，带登录态剩余天数，但**不**显示 stale/预警。
+- 实现位置：`daily_records.js`（`summary` 增加 `source`/`token_remaining_days`）、`wecom_webhook.js` 与 `pushplus.js` 的 `pushDailyReport` 按 `source` 区分渲染。
+- 想立即验证：在 GitHub → Actions 手动 `workflow_dispatch` 分别触发 patrol / daily，观察两条企业微信消息标题与字段差异。
+
 ---
 
 ## 5. 增量模式与状态管理

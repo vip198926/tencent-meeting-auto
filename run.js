@@ -43,13 +43,15 @@ async function main() {
   }
 
   // 2. 跑管线
-  const opts = { log: console.log, notify: true };
+  // source 标识调用方：patrol（巡检）/ daily（09:36 管线）/ 手动（缺省取 mode）
+  const source = process.env.SOURCE || process.env.CTM_JOB_SOURCE || mode;
+  const opts = { log: console.log, notify: true, source };
   let summary;
   if (mode === 'daily') {
-    console.log('[RUN] 模式=按天，目标=' + (dateArg || '昨天'));
+    console.log('[RUN] 模式=按天，目标=' + (dateArg || '昨天') + '，来源=' + source);
     summary = await runDaily(dateArg, opts);
   } else {
-    console.log('[RUN] 模式=增量');
+    console.log('[RUN] 模式=增量，来源=' + source);
     summary = await runIncremental(opts);
   }
 

@@ -26,6 +26,7 @@ jobs:
       IMA_CLIENT_ID: ${{ secrets.IMA_CLIENT_ID }}
       IMA_API_KEY: ${{ secrets.IMA_API_KEY }}
       WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+      SOURCE: daily
     steps:
       - name: Checkout
         uses: actions/checkout@v4

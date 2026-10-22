@@ -56,19 +56,31 @@ async function send(title, content, template = 'markdown') {
   throw new Error('PushPlus 返回: ' + JSON.stringify(r.json || r.raw || r.status).slice(0, 200));
 }
 
-/** 每日管线跑完后推送日报摘要 */
+/** 每日管线 / 巡检 推送摘要
+ *  source === 'patrol' 时标题为「巡检简报」并附登录态剩余天数 + 积压/超时预警。
+ */
 async function pushDailyReport(summary) {
-  const { date, meetings, ok, fail, skipped, noRecord, error } = summary;
+  const { date, meetings, ok, fail, skipped, noRecord, error, md, source, token_remaining_days, stale_hours } = summary;
+  const isPatrol = source === 'patrol';
   const title = error
-    ? `⚠️ 会议转写日报 ${date} 执行异常`
-    : `📋 会议转写日报 ${date}（${meetings} 场会）`;
+    ? `⚠️ 会议转写${isPatrol ? '巡检' : '日报'} ${date} 执行异常`
+    : `${isPatrol ? '🔍 会议转写巡检简报' : '📋 会议转写日报'} ${date}（${meetings} 场会）`;
   let content;
   if (error) {
     content = `## 执行失败\n\n错误：${error}\n\n请检查腾讯会议登录态（在本机运行 sync_auth.bat 刷新同步）。`;
   } else {
     const head = `**${date}** 共 ${meetings} 场会\n\n- ✅ 成功上传：${ok} 条\n- ❌ 失败：${fail} 条\n- ⏭️ 已上传跳过：${skipped} 条\n- ⬜ 无录制/转写：${noRecord} 场`;
-    const detail = (summary.md || '').split('| 时间 | 标题 | 类型 | 结果 |')[1];
-    content = head + (detail ? `\n\n### 明细\n\n| 时间 | 标题 | 类型 | 结果 |${detail}` : '');
+    const extra = [];
+    if (typeof token_remaining_days === 'number') extra.push(`- 🔑 登录态剩余约 ${token_remaining_days} 天`);
+    if (isPatrol) {
+      if (typeof stale_hours === 'number') extra.push(`- ⏱️ 距上次处理 ${stale_hours} 小时`);
+      const alerts = [];
+      if (typeof token_remaining_days === 'number' && token_remaining_days < 2) alerts.push('登录态即将失效(<2天)');
+      if (typeof stale_hours === 'number' && stale_hours > 26) alerts.push(`距上次处理已达 ${stale_hours}h，疑似漏跑`);
+      if (alerts.length) extra.push(`- ⚠️ 预警：${alerts.join('；')}`);
+    }
+    const detail = (md || '').split('| 时间 | 标题 | 类型 | 结果 |')[1];
+    content = head + (extra.length ? '\n\n' + extra.join('\n') : '') + (detail ? `\n\n### 明细\n\n| 时间 | 标题 | 类型 | 结果 |${detail}` : '');
   }
   return send(title, content, 'markdown');
 }
