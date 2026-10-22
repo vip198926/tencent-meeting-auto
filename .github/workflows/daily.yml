@@ -23,7 +23,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      CTM_AUTH_STATE: ${{ runner.temp }}/auth_state.json   # 登录态写到仓库之外的临时目录
       IMA_CLIENT_ID: ${{ secrets.IMA_CLIENT_ID }}
       IMA_API_KEY: ${{ secrets.IMA_API_KEY }}
       WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
@@ -34,7 +33,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: setup-node@v4
         with:
           node-version: '20'
 
@@ -42,8 +41,10 @@ jobs:
         env:
           CTM_AUTH_STATE_RAW: ${{ secrets.CTM_AUTH_STATE_RAW }}
         run: |
-          printf '%s' "$CTM_AUTH_STATE_RAW" > "$CTM_AUTH_STATE"
-          echo "auth_state.json 字节数: $(wc -c < "$CTM_AUTH_STATE")"
+          AUTH_PATH="$RUNNER_TEMP/auth_state.json"
+          printf '%s' "$CTM_AUTH_STATE_RAW" > "$AUTH_PATH"
+          echo "CTM_AUTH_STATE=$AUTH_PATH" >> "$GITHUB_ENV"
+          echo "auth_state.json 字节数: $(wc -c < "$AUTH_PATH")"
 
       - name: 运行管线（续期登录态 -> 拉会 -> 转写 -> IMA -> 企业微信）
         run: |
@@ -63,4 +64,4 @@ jobs:
 
       - name: 清理临时凭证
         if: always()
-        run: rm -f "$CTM_AUTH_STATE"
+        run: rm -f "$RUNNER_TEMP/auth_state.json"
