@@ -6,6 +6,8 @@
  *   - CTM_AUTH_STATE 指向一个临时文件（由 workflow 从 Secret 写出到 $RUNNER_TEMP，仓库之外）。
  *   - 每次运行先纯 HTTP 续期登录态（延长 7 天），再跑增量/按天管线。
  *   - 状态文件（last_progress.json / processed_records.json）由 workflow 提交回仓库持久化。
+ *   - 健壮性：无论成功/失败都写心跳日志 daily/run_log.jsonl（确保每次触发在 git 可见），
+ *     失败时额外推送企业微信错误通知，杜绝「静默丢失」。
  *
  * 用法（workflow 调用）：
  *   node run.js inc                 # 增量：处理「上次截止 -> 现在」
@@ -14,12 +16,25 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const { runIncremental, runDaily } = require('./daily_records');
-const { refreshToken, tokenRemainingDays } = require('./token_refresh');
+const { runIncremental, runDaily, bjDateString } = require('./daily_records');
+const { refreshToken } = require('./token_refresh');
 
 const AUTH_PATH = process.env.CTM_AUTH_STATE && process.env.CTM_AUTH_STATE.endsWith('.json')
   ? process.env.CTM_AUTH_STATE
   : path.join(__dirname, 'auth_state.json');
+
+const OUT_DIR = path.join(__dirname, 'daily');
+const RUN_LOG = path.join(OUT_DIR, 'run_log.jsonl');
+
+/** 心跳日志：无论成功/失败都追加一行，确保每次触发在 git 可见（解决静默丢失盲区） */
+function writeRunLog(entry) {
+  try {
+    fs.mkdirSync(OUT_DIR, { recursive: true });
+    fs.appendFileSync(RUN_LOG, JSON.stringify(entry) + '\n', 'utf8');
+  } catch (e) {
+    console.error('[RUN] 写心跳日志失败: ' + e.message);
+  }
+}
 
 async function main() {
   const mode = process.argv[2] || 'inc';
@@ -54,14 +69,48 @@ async function main() {
     console.log('[RUN] 模式=增量，来源=' + source);
     summary = await runIncremental(opts);
   }
-
-  // 3. 汇总（便于 Actions 日志审计；不打印任何凭证）
-  const remain = (() => { try { return Math.round(tokenRemainingDays(AUTH_PATH) * 10) / 10; } catch { return null; } })();
-  console.log('[RUN] 完成 ->', JSON.stringify({
-    mode, date: summary.date, meetings: summary.meetings,
-    ok: summary.ok, fail: summary.fail, skipped: summary.skipped, noRecord: summary.noRecord,
-    token_remaining_days: remain,
-  }));
+  return { mode, source, summary };
 }
 
-main().catch(e => { console.error('[RUN] FATAL', e.message); process.exit(1); });
+// 顶层包装：保证失败也发声、每次触发都留痕
+(async () => {
+  const startedAt = new Date().toISOString();
+  let status = 'ok';
+  let errMsg = null;
+  let result = null;
+  try {
+    result = await main();
+  } catch (e) {
+    status = 'error';
+    errMsg = (e && e.message) ? e.message.slice(0, 500) : String(e);
+    console.error('[RUN] FATAL ' + errMsg);
+  }
+
+  // 心跳日志（成功/失败都写）
+  writeRunLog({
+    ts: startedAt,
+    finished: new Date().toISOString(),
+    mode: process.argv[2] || 'inc',
+    source: process.env.SOURCE || 'unknown',
+    status,
+    error: errMsg,
+    summary: result && result.summary ? {
+      date: result.summary.date, meetings: result.summary.meetings,
+      ok: result.summary.ok, fail: result.summary.fail,
+      skipped: result.summary.skipped, noRecord: result.summary.noRecord,
+    } : null,
+  });
+
+  // 失败时额外推送企业微信错误通知（成功通知已在管线内发送）
+  if (status === 'error') {
+    try {
+      const { pushDailyReport: pushWecom } = require('./wecom_webhook');
+      const r = await pushWecom({ source: process.env.SOURCE || 'inc', date: bjDateString(0), error: errMsg });
+      console.log('[RUN] 已发送失败通知（wecom）: ' + JSON.stringify(r));
+    } catch (e) {
+      console.error('[RUN] 失败通知发送异常: ' + e.message);
+    }
+  }
+
+  process.exit(status === 'error' ? 1 : 0);
+})();

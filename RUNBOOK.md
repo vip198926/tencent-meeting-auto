@@ -89,6 +89,16 @@ GitHub Actions 的 cron 为 **UTC**，已换算：
 - 实现位置：`daily_records.js`（`summary` 增加 `source`/`token_remaining_days`）、`wecom_webhook.js` 与 `pushplus.js` 的 `pushDailyReport` 按 `source` 区分渲染。
 - 想立即验证：在 GitHub → Actions 手动 `workflow_dispatch` 分别触发 patrol / daily，观察两条企业微信消息标题与字段差异。
 
+**失败不再静默（健壮性加固）**：`run.js` 顶层用 try/catch 包裹主流程，保证「任何一次触发都能被看见」：
+- 每次运行都向 `daily/run_log.jsonl` **追加一行心跳**（成功 `status:"ok"` / 失败 `status:"error"`，含 `source`、`error`、计数摘要）。该文件随状态一起 commit，因此 **git 历史里每次触发都留痕**，杜绝「既没消息也没提交」的盲区。
+- 若主流程抛错（如登录态缺失/接口失败/网络异常），除写心跳外，还会**额外推送一条「❌ 会议转写执行失败」企业微信通知**（带错误原文），并 `exit 1`（Actions 该次运行标红）。
+
+**⚠️ GitHub Actions 定时器的固有不可靠性（重要）**：GitHub 的 `schedule:` 是 **best-effort**，共享调度池在高峰时段会**延迟数分钟到数小时，极端情况直接跳过当次**。本仓库已观察到 patrol 被延迟约 3 小时（应在 03:36，实际 ~06:41 才跑）。因此：
+- **09:36 的 daily 若没收到消息，大概率是 GitHub 调度延迟/跳过，而非代码坏掉**；它可能在数小时后才补发，也可能当天被跳过。
+- **数据不会丢**：两 workflow 都是「增量模式」（处理 `processed_until → now`），即便某次被跳过，下一轮（次日 patrol 或 daily）会自动补上这段窗口的会议，只是通知会晚到。
+- 想确认到底是「延迟」还是「被跳过」：GitHub → Actions → `会议转写-每日管线` 看 09:36 那次运行是否存在（以及状态）。git 里的 `daily/run_log.jsonl` 也能看到是否触发过。
+- 若要求「按时必到」：需用外部可靠定时器（如 cron-job.org / 云函数定时）通过 `workflow_dispatch` API 主动触发，而非依赖 GitHub 自带 `schedule:`（该方案需一个具备 `actions:write` 权限的 token，存于外部服务）。
+
 ---
 
 ## 5. 增量模式与状态管理
