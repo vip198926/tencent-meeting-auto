@@ -197,7 +197,10 @@ PAT 安全属性（设置时即遵循）：仅 `repo` 权限、7 天过期；用
 | workflow dispatch 422 `Expected format {org}/{repo}@ref` | action 缺 `actions/` 前缀；用 `actions/checkout@v4`、`actions/setup-node@v4` |
 | 本地 push 被拒（non-fast-forward） | workflow 已 commit 状态；先 `git fetch` + `git rebase origin/master` 再 push |
 | 重复上传 IMA | 检查 `daily/processed_records.json` 去重列表是否完整；勿双端触发 |
+| IMA 上传报 `code=220004 invalid or outdated knowledge_base_id` | **IMA 轮换了知识库 ID**（旧 base64 格式已失效，现要求 `ima_kb_XXXXXXXX`）。打开 `ima_upload.js` 把 `DEFAULT_KB_ID` 改为 IMA 当前有效 ID（用 IMA 凭证调 `search_knowledge_base` 接口、按库名「DY知识库」拿 `kb_id`）。已轮换一次（2026-10-23：`ima_kb_3nebCJv6`）。 |
 | 平台进程重启导致漏跑 | GitHub 版不受影响；云端版已关定时器，无需担心 |
+
+> **IMA 知识库 ID 刷新方法（轮换时按此操作）**：用 `ctm-cloud/ima_creds.json` 的 `client_id/api_key` 调 `POST https://ima.qq.com/openapi/wiki/v1/search_knowledge_base`，body 用 **小写** `{"limit":20}`（大写 `Limit` 会被判越界），从 `info_list[].kb_id` 里取目标库（「DY知识库」）的 `kb_id`，填进 `ima_upload.js` 的 `DEFAULT_KB_ID` 提交即可。只读接口，不影响线上数据。
 
 ---
 

@@ -15,7 +15,7 @@ const BASE_URL = 'https://ima.qq.com';
 const API_BASE = '/openapi/wiki/v1';
 const SKILL_VERSION = '1.1.10';
 
-const DEFAULT_KB_ID = 'GHG8hApHL9UueCSPl-hD_Zus7IL-tPXgB2floa6eI70='; // DY知识库
+const DEFAULT_KB_ID = 'ima_kb_3nebCJv6'; // DY知识库（IMA 2026-10-23 轮换后的新 ID；旧 base64 格式 ID 已失效 code=220004）
 const DEFAULT_FOLDER_ID = 'folder_7479402237546408';                  // 腾讯会议转写
 
 function getCreds() {
