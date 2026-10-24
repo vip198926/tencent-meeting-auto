@@ -50,8 +50,12 @@ jobs:
           git config user.name "ctm-bot"
           git add daily/
           git diff --cached --quiet || git commit -m "chore(state): update $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          git pull --rebase origin "${GITHUB_REF_NAME}" || true
-          git push
+          # 并发场景下两个 workflow 可能同时 push 同一分支，重试避免非快进冲突
+          for i in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" || true
+            if git push; then break; fi
+            sleep 5
+          done
 
       - name: 清理临时凭证
         if: always()
