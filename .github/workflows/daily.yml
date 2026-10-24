@@ -1,8 +1,10 @@
 name: 会议转写-每日管线
 
 on:
-  schedule:
-    - cron: '36 1 * * *'   # 北京时间 09:36 = UTC 01:36
+  # 内部 schedule 已禁用：GitHub 定时事件 best-effort、无 SLA，实测稳定延迟 4.75h+。
+  # 改由外部定时器（cron-job.org 等）调用 workflow_dispatch 准点触发，详见 RUNBOOK §可靠触发。
+  # schedule:
+  #   - cron: '36 1 * * *'   # 北京时间 09:36 = UTC 01:36
   workflow_dispatch:
     inputs:
       mode:

@@ -93,11 +93,46 @@ GitHub Actions 的 cron 为 **UTC**，已换算：
 - 每次运行都向 `daily/run_log.jsonl` **追加一行心跳**（成功 `status:"ok"` / 失败 `status:"error"`，含 `source`、`error`、计数摘要）。该文件随状态一起 commit，因此 **git 历史里每次触发都留痕**，杜绝「既没消息也没提交」的盲区。
 - 若主流程抛错（如登录态缺失/接口失败/网络异常），除写心跳外，还会**额外推送一条「❌ 会议转写执行失败」企业微信通知**（带错误原文），并 `exit 1`（Actions 该次运行标红）。
 
-**⚠️ GitHub Actions 定时器的固有不可靠性（重要）**：GitHub 的 `schedule:` 是 **best-effort**，共享调度池在高峰时段会**延迟数分钟到数小时，极端情况直接跳过当次**。本仓库已观察到 patrol 被延迟约 3 小时（应在 03:36，实际 ~06:41 才跑）。因此：
-- **09:36 的 daily 若没收到消息，大概率是 GitHub 调度延迟/跳过，而非代码坏掉**；它可能在数小时后才补发，也可能当天被跳过。
-- **数据不会丢**：两 workflow 都是「增量模式」（处理 `processed_until → now`），即便某次被跳过，下一轮（次日 patrol 或 daily）会自动补上这段窗口的会议，只是通知会晚到。
-- 想确认到底是「延迟」还是「被跳过」：GitHub → Actions → `会议转写-每日管线` 看 09:36 那次运行是否存在（以及状态）。git 里的 `daily/run_log.jsonl` 也能看到是否触发过。
-- 若要求「按时必到」：需用外部可靠定时器（如 cron-job.org / 云函数定时）通过 `workflow_dispatch` API 主动触发，而非依赖 GitHub 自带 `schedule:`（该方案需一个具备 `actions:write` 权限的 token，存于外部服务）。
+**⚠️ GitHub 定时器的实测延迟（已诊断，非换算错误）**：GitHub 的 `schedule:` 是 **best-effort、无 SLA**，共享调度池在高峰会延迟数分钟到数小时。本仓库实测（来自 `daily/run_log.jsonl`）：
+
+| 任务 | 计划(BJ) | 实际触发(BJ) | 偏差 | 证据 |
+|---|---|---|---|---|
+| patrol | 03:36 | 06:41(10-23) / 06:34(10-24) | ≈3h | run_log + ctm-bot 提交 |
+| daily | 09:36 | 14:25(10-23) / 14:21(10-24) | ≈4h45m | run_log |
+
+为什么**不是换算/时期错误**：两个任务偏差量不同（3h vs 4h45m）。若是时区换算写错，二者会呈现**同一固定偏移**。偏差不同 ⇒ 时间设置正确，纯属 GitHub 把触发事件排进滞后队列。节点执行本身仅 ~13s，延迟全在"定时触发→实际启动"之间。
+
+**已采取的决策**：两个 workflow 的 `schedule:` 块已**注释禁用**（见 patrol.yml / daily.yml 顶部 `on:`），不再依赖 GitHub 内部调度，改由**外部定时器调用 `workflow_dispatch` 准点触发**。这样保证「按时必到 + 单次通知」，不再有每日 14:21 的重复「0 会议」噪音。
+
+**数据不会丢**：两 workflow 均为「增量模式」（处理 `processed_until → now`），即便某天外部定时器故障未触发，次日运行会自动补上遗漏窗口；只影响当天通知晚到，不丢会议。
+
+### 4.1 可靠触发方案（外部定时器 → workflow_dispatch）
+
+**① 本地/手动触发脚本**：`trigger_dispatch.sh`（仓库根目录）
+```bash
+GH_DISPATCH_TOKEN=<具备 actions:write 的 token> bash trigger_dispatch.sh [patrol|daily|all]
+```
+脚本用 `Bearer` 调 `POST /repos/vip198926/tencent-meeting-auto/actions/workflows/<wf>/dispatches`（body `{"ref":"master","inputs":{}}`）。token 走环境变量，**不入库**。
+
+**② 云端定时（推荐，无需开电脑）**：用 [cron-job.org](https://cron-job.org)（免费）建两个 job，准点 POST 到 GitHub API：
+- **patrol**：URL `https://api.github.com/repos/vip198926/tencent-meeting-auto/actions/workflows/patrol.yml/dispatches`，Method `POST`
+- **daily**：URL `.../actions/workflows/daily.yml/dispatches`，Method `POST`
+- Headers（两者相同）：
+  - `Accept: application/vnd.github+json`
+  - `Authorization: Bearer <token>`
+  - `X-GitHub-Api-Version: 2022-11-28`
+  - `Content-Type: application/json`
+- Body（两者相同）：`{"ref":"master","inputs":{}}`
+- **时间**：cron-job.org 账号时区设 **UTC**，则 patrol=`19:36`、daily=`01:36`（即 BJ 次日 03:36 / 当日 09:36）。设 Shanghai 时区则直接填 `03:36` / `09:36`。
+
+**③ 所需 token（重要，别用那只待撤销的 classic PAT）**：
+- fine-grained PAT：仅选本仓库，授予 **Actions: Read and write**；或
+- classic PAT：含 `repo`（含 workflow 权限）。
+- 该 token 仅用于触发，存于 cron-job.org 或本机环境变量；与仓库 Secrets（`CTM_AUTH_STATE_RAW` 等）无关，撤销旧 classic PAT 不影响它。
+
+**④ 兜底**：若外部定时器当天故障，可在 GitHub → Actions → 对应 workflow → **Run workflow** 手动触发一次，数据会在下一轮补齐。
+
+> 设置完外部定时器后，GitHub 内部 `schedule:` 已不会再产生重复运行；若日后想恢复 GitHub 自带调度，取消两个 workflow 顶部 `schedule:` 的注释即可（但会重新引入延迟）。
 
 ---
 

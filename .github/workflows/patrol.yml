@@ -1,8 +1,10 @@
 name: 会议转写-巡检补跑
 
 on:
-  schedule:
-    - cron: '36 19 * * *'   # 北京时间 03:36 = UTC 前一天 19:36
+  # 内部 schedule 已禁用：GitHub 定时事件 best-effort、无 SLA，实测稳定延迟 3h+。
+  # 改由外部定时器（cron-job.org 等）调用 workflow_dispatch 准点触发，详见 RUNBOOK §可靠触发。
+  # schedule:
+  #   - cron: '36 19 * * *'   # 北京时间 03:36 = UTC 前一天 19:36
   workflow_dispatch:
 
 # 仅授予本工作流推送状态文件所需的最小权限
