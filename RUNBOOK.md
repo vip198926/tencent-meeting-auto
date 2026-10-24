@@ -108,29 +108,48 @@ GitHub Actions 的 cron 为 **UTC**，已换算：
 
 ### 4.1 可靠触发方案（外部定时器 → workflow_dispatch）
 
+由于 GitHub 内部 `schedule:` 实测延迟 3–4.75h（见上表），已禁用，改由外部定时器准点调 `workflow_dispatch`。以下为可直接照抄的落地清单（结构同仓库外 `cronjob_setup.md`，但出于安全 **token 用占位符**，真实值见该外部文件）。
+
 **① 本地/手动触发脚本**：`trigger_dispatch.sh`（仓库根目录）
 ```bash
-GH_DISPATCH_TOKEN=<具备 actions:write 的 token> bash trigger_dispatch.sh [patrol|daily|all]
+GH_DISPATCH_TOKEN=<FINE_GRAINED_PAT> bash trigger_dispatch.sh [patrol|daily|all]
 ```
 脚本用 `Bearer` 调 `POST /repos/vip198926/tencent-meeting-auto/actions/workflows/<wf>/dispatches`（body `{"ref":"master","inputs":{}}`）。token 走环境变量，**不入库**。
 
-**② 云端定时（推荐，无需开电脑）**：用 [cron-job.org](https://cron-job.org)（免费）建两个 job，准点 POST 到 GitHub API：
-- **patrol**：URL `https://api.github.com/repos/vip198926/tencent-meeting-auto/actions/workflows/patrol.yml/dispatches`，Method `POST`
-- **daily**：URL `.../actions/workflows/daily.yml/dispatches`，Method `POST`
-- Headers（两者相同）：
-  - `Accept: application/vnd.github+json`
-  - `Authorization: Bearer <token>`
-  - `X-GitHub-Api-Version: 2022-11-28`
-  - `Content-Type: application/json`
-- Body（两者相同）：`{"ref":"master","inputs":{}}`
-- **时间**：cron-job.org 账号时区设 **UTC**，则 patrol=`19:36`、daily=`01:36`（即 BJ 次日 03:36 / 当日 09:36）。设 Shanghai 时区则直接填 `03:36` / `09:36`。
+**② cron-job.org 配置清单（推荐，无需开电脑）**
 
-**③ 所需 token（重要，别用那只待撤销的 classic PAT）**：
-- fine-grained PAT：仅选本仓库，授予 **Actions: Read and write**；或
-- classic PAT：含 `repo`（含 workflow 权限）。
-- 该 token 仅用于触发，存于 cron-job.org 或本机环境变量；与仓库 Secrets（`CTM_AUTH_STATE_RAW` 等）无关，撤销旧 classic PAT 不影响它。
+> 准备工作：注册/登录 https://cron-job.org；**账号 → Settings → Timezone 设为 `UTC`**（若设 `Asia/Shanghai`，则下方时间改填 `03:36` / `09:36`）。
+>
+> 所需 token —— fine-grained PAT，仅选本仓库 `tencent-meeting-auto`，授予 **Actions: Read and write**（旧 classic PAT 已撤销，与此无关）。
+> 真实值见仓库外文件 `outputs/_ctm/cronjob_setup.md`（不入库）。下文 `Authorization` 行的 `<FINE_GRAINED_PAT>` 即替换为此值。
 
-**④ 兜底**：若外部定时器当天故障，可在 GitHub → Actions → 对应 workflow → **Run workflow** 手动触发一次，数据会在下一轮补齐。
+- **Job 1 — 巡检 patrol（北京时间 次日 03:36）**
+  - **URL**：`https://api.github.com/repos/vip198926/tencent-meeting-auto/actions/workflows/patrol.yml/dispatches`
+  - **Method**：`POST`
+  - **Headers**（逐字复制，注意把 `<FINE_GRAINED_PAT>` 换成真实 token）：
+    ```
+    Accept: application/vnd.github+json
+    Authorization: Bearer <FINE_GRAINED_PAT>
+    X-GitHub-Api-Version: 2022-11-28
+    Content-Type: application/json
+    ```
+  - **Body**（raw）：`{"ref":"master","inputs":{}}`
+  - **Schedule**：每天 `19:36`（UTC）
+
+- **Job 2 — 每日管线 daily（北京时间 09:36）**
+  - **URL**：`https://api.github.com/repos/vip198926/tencent-meeting-auto/actions/workflows/daily.yml/dispatches`
+  - **Method**：`POST`
+  - **Headers**：同上（4 行一致）
+  - **Body**（raw）：`{"ref":"master","inputs":{}}`
+  - **Schedule**：每天 `01:36`（UTC）
+
+> 实测记录：用该 token 同时 dispatch 两个 workflow 均返回 `HTTP 204`；并曾暴露并发 `git push` 冲突（两任务同时 push 抢同一分支），已修复为「rebase 后重试循环」，复测并发触发全部 `success`。
+
+**③ 兜底**：若外部定时器当天故障，可在 GitHub → Actions → 对应 workflow → **Run workflow** 手动触发一次，数据会在下一轮补齐（增量模式，不丢会议）。
+
+**④ 验证是否生效**：
+- 准点后查看企业微信是否收到「🔍 巡检简报」/「📋 日报」；
+- 或看 GitHub → Actions 对应 workflow 是否有新 run，及 `daily/run_log.jsonl` 触发时间是否≈准点。
 
 > 设置完外部定时器后，GitHub 内部 `schedule:` 已不会再产生重复运行；若日后想恢复 GitHub 自带调度，取消两个 workflow 顶部 `schedule:` 的注释即可（但会重新引入延迟）。
 
