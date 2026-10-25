@@ -14,7 +14,7 @@
  *   4. uploadMarkdown → IMA
  *
  * 输出：daily/records_<标签>.md + .json
- * 去重：daily/processed_records.json 记录已处理的 record_id；同一会议的多条记录（录制/转写）只上传最优一份（优先带AI纪要，其次段落更多），避免重复上传 IMA
+ * 去重：daily/processed_records.json 记录已处理的 record_id（仅按 record_id 维度，防增量窗口重叠导致的重复上传）；同一会议号下的不同录制/转写记录各自独立上传，避免误删不同内容的会议
  * 注意：会议列表接口只支持查最近 31 天，增量窗口起点会 clamp 到 now-31d+1d。
  */
 'use strict';
@@ -203,22 +203,29 @@ async function processMeetings(dayMeetings, log) {
       continue;
     }
 
-    // 方案 B：同一会议的多条记录（录制 / 转写）只上传最优一份，其余标记已处理避免重复上传 IMA
-    const fetched = [];
+    // 按 record_id 独立上传：同一会议号下的不同录制/转写记录各自上传，不按 meeting 去重，
+    // 避免把「同一会议号下的多场不同会议」误删为一份。仅按 record_id 去重，防增量窗口重叠导致的重复上传。
     for (const rec of records) {
       const rid = rec.record_id;
       const rTitle = rec.title || mSubject;
       const kind = /^转写[_-]/.test(rTitle) ? '转写' : '录制';
-      if (processed.has(rid) || processed.has('m:' + m.meeting_id)) {
+      if (processed.has(rid)) {
         skipCount++;
-        log(`    ⏭️ 已处理过（同会议去重），跳过：${rTitle}`);
-        results.push({ record_id: rid, subject: rTitle, time: mTime, ok: true, skipped: true, reason: '已处理过' });
-        lines.push(`| ${mTime} | ${rTitle} | ${kind} | ⏭️ 已处理过 |`);
+        log(`    ⏭️ 已上传过，跳过：${rTitle}`);
+        results.push({ record_id: rid, subject: rTitle, time: mTime, ok: true, skipped: true, reason: '已上传过' });
+        lines.push(`| ${mTime} | ${rTitle} | ${kind} | ⏭️ 已上传过 |`);
         continue;
       }
       try {
         const t = await fetchTranscript(rid, { authPath: AUTH_PATH });
-        fetched.push({ rid, rTitle, kind, t, paragraphs: t.paragraphs.length, hasSummary: !!t.meta.summary });
+        const title = sanitize(t.meta.subject) || sanitize(rTitle);
+        const up = await uploadMarkdown(title, t.text);
+        okCount++;
+        processed.add(rid);
+        saveProcessed(processed);
+        log(`    ✅ ${up.title}（${t.paragraphs.length} 段${t.meta.summary ? '，含AI纪要' : ''}）`);
+        results.push({ record_id: rid, subject: rTitle, time: mTime, kind, ok: true, title: up.title, paragraphs: t.paragraphs.length, hasSummary: !!t.meta.summary });
+        lines.push(`| ${mTime} | ${up.title} | ${kind} | ✅ ${t.paragraphs.length} 段 |`);
       } catch (e) {
         failCount++;
         log(`    ❌ ${rTitle} — ${e.message.slice(0, 150)}`);
@@ -226,43 +233,6 @@ async function processMeetings(dayMeetings, log) {
         lines.push(`| ${mTime} | ${rTitle} | ${kind} | ❌ ${e.message.slice(0, 60)} |`);
       }
       await new Promise(r => setTimeout(r, 700));
-    }
-
-    // 选最优：优先带 AI 纪要，其次段落更多
-    let best = null;
-    for (const f of fetched) {
-      const score = (f.hasSummary ? 1000 : 0) + f.paragraphs;
-      if (!best || score > best.score) best = { ...f, score };
-    }
-
-    // 上传最优一份；其余同会议记录标记已处理但不重复上传 IMA（保证只有录制无转写时也能正常上传）
-    for (const f of fetched) {
-      if (f === best) {
-        const title = sanitize(f.t.meta.subject) || sanitize(f.rTitle);
-        try {
-          const up = await uploadMarkdown(title, f.t.text);
-          okCount++;
-          processed.add(f.rid);
-          processed.add('m:' + m.meeting_id);
-          saveProcessed(processed);
-          log(`    ✅ ${up.title}（${f.paragraphs} 段${f.hasSummary ? '，含AI纪要' : ''}）`);
-          results.push({ record_id: f.rid, subject: f.rTitle, time: mTime, kind: f.kind, ok: true, title: up.title, paragraphs: f.paragraphs, hasSummary: f.hasSummary });
-          lines.push(`| ${mTime} | ${up.title} | ${f.kind} | ✅ ${f.paragraphs} 段 |`);
-        } catch (e) {
-          failCount++;
-          log(`    ❌ ${f.rTitle} — ${e.message.slice(0, 150)}`);
-          results.push({ record_id: f.rid, subject: f.rTitle, time: mTime, kind: f.kind, ok: false, error: e.message });
-          lines.push(`| ${mTime} | ${f.rTitle} | ${f.kind} | ❌ ${e.message.slice(0, 60)} |`);
-        }
-      } else {
-        // 次优记录：已抓取，不再上传 IMA，但标记已处理，避免增量窗口重叠时重复 fetch
-        processed.add(f.rid);
-        saveProcessed(processed);
-        skipCount++;
-        log(`    ⏭️ 同会议已选更优记录（${best.paragraphs}段${best.hasSummary ? '·含AI纪要' : ''}），跳过：${f.rTitle}（${f.paragraphs}段）`);
-        results.push({ record_id: f.rid, subject: f.rTitle, time: mTime, kind: f.kind, ok: true, skipped: true, reason: '同会议次优记录' });
-        lines.push(`| ${mTime} | ${f.rTitle} | ${f.kind} | ⏭️ 同会议已选更优 |`);
-      }
     }
   }
   return { ok: okCount, fail: failCount, skipped: skipCount, noRecord: noRecordCount, results, lines };
