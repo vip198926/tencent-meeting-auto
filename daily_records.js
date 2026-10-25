@@ -209,7 +209,7 @@ async function processMeetings(dayMeetings, log) {
       const rid = rec.record_id;
       const rTitle = rec.title || mSubject;
       const kind = /^转写[_-]/.test(rTitle) ? '转写' : '录制';
-      if (processed.has(rid)) {
+      if (processed.has(rid) || processed.has('m:' + m.meeting_id)) {
         skipCount++;
         log(`    ⏭️ 已处理过（同会议去重），跳过：${rTitle}`);
         results.push({ record_id: rid, subject: rTitle, time: mTime, ok: true, skipped: true, reason: '已处理过' });
@@ -243,6 +243,7 @@ async function processMeetings(dayMeetings, log) {
           const up = await uploadMarkdown(title, f.t.text);
           okCount++;
           processed.add(f.rid);
+          processed.add('m:' + m.meeting_id);
           saveProcessed(processed);
           log(`    ✅ ${up.title}（${f.paragraphs} 段${f.hasSummary ? '，含AI纪要' : ''}）`);
           results.push({ record_id: f.rid, subject: f.rTitle, time: mTime, kind: f.kind, ok: true, title: up.title, paragraphs: f.paragraphs, hasSummary: f.hasSummary });
