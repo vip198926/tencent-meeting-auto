@@ -203,12 +203,24 @@ async function processMeetings(dayMeetings, log) {
       continue;
     }
 
-    // 按 record_id 独立上传：同一会议号下的不同录制/转写记录各自上传，不按 meeting 去重，
-    // 避免把「同一会议号下的多场不同会议」误删为一份。仅按 record_id 去重，防增量窗口重叠导致的重复上传。
+    // 简单优先转写：同一会议号下，若既有转写又有录制，只上传转写、跳过录制
+    // （转写会议开始即自动生成、更完整）；若无转写则正常上传录制（兼容「只有录制没有转写」）。
+    // 仍仅按 record_id 去重，防增量窗口重叠导致的重复上传。
+    // ⚠️ 腾讯会议会把同一会议号下的多场不同会议归到同一 meeting_id；若其中一场是转写、另一场是录制，
+    //   录制那场会被跳过（按用户选择，接受此偶发丢不同会议数据的风险）。
+    const hasTrans = records.some(r => /^转写[_-]/.test(r.title || mSubject));
     for (const rec of records) {
       const rid = rec.record_id;
       const rTitle = rec.title || mSubject;
       const kind = /^转写[_-]/.test(rTitle) ? '转写' : '录制';
+      // 转写优先：存在转写时，录制记录直接跳过（不抓取、不上传）
+      if (hasTrans && kind === '录制') {
+        skipCount++;
+        log(`    ⏭️ 转写优先，跳过录制：${rTitle}`);
+        results.push({ record_id: rid, subject: rTitle, time: mTime, ok: true, skipped: true, reason: '转写优先' });
+        lines.push(`| ${mTime} | ${rTitle} | 录制 | ⏭️ 转写优先 |`);
+        continue;
+      }
       if (processed.has(rid)) {
         skipCount++;
         log(`    ⏭️ 已上传过，跳过：${rTitle}`);
