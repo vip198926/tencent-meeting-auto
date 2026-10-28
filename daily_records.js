@@ -22,7 +22,7 @@ const fs = require('fs');
 const https = require('https');
 const crypto = require('crypto');
 const path = require('path');
-const { fetchTranscript } = require('./ctm_fetch');
+const { fetchTranscript, formatTranscript } = require('./ctm_fetch');
 const { uploadMarkdown } = require('./ima_upload');
 const { pushDailyReport: pushWecom } = require('./wecom_webhook');
 const { pushDailyReport: pushPushplus } = require('./pushplus');
@@ -147,6 +147,53 @@ function checkAuth(log) {
   if (!weMeetToken) log('⚠️ auth_state.json 中缺少 we_meet_token，无法查录制列表');
 }
 
+// ---- 逐字稿比对 / 合并辅助 ----
+// 归一化：去空白、去标点、转小写，仅保留中英文与数字
+function normText(s) {
+  return (s || '').replace(/\s+/g, '').replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').toLowerCase();
+}
+// 字符 n-gram 集合（默认 4 字），用于内容相似度
+function grams(s, n = 4) {
+  const t = normText(s);
+  const set = new Set();
+  for (let i = 0; i + n <= t.length; i++) set.add(t.slice(i, i + n));
+  return set;
+}
+// 两份文本的 Jaccard 相似度（0~1）
+function textSimilarity(a, b) {
+  const A = grams(a), B = grams(b);
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  for (const g of A) if (B.has(g)) inter++;
+  return inter / (A.size + B.size - inter);
+}
+// other 中有多少比例的内容是 base 里没有的（互补度）
+function uniqueFraction(other, base) {
+  const B = grams(base), O = grams(other);
+  if (!O.size) return 0;
+  let uniq = 0;
+  for (const g of O) if (!B.has(g)) uniq++;
+  return uniq / O.size;
+}
+// 段落去重 key
+function paraKey(p) {
+  const t = (p.sentences || []).map(s => (s.words || []).map(w => w.text || '').join('')).join('');
+  return normText(t);
+}
+// 合并两份段落数组，按内容去重，保留顺序
+function mergeParagraphs(p1, p2) {
+  const seen = new Set();
+  const out = [];
+  for (const p of [...(p1 || []), ...(p2 || [])]) {
+    const k = paraKey(p);
+    if (k && seen.has(k)) continue;
+    if (k) seen.add(k);
+    out.push(p);
+  }
+  return out;
+}
+const SIM_THRESHOLD = 0.35; // 相似度 >= 此值视为同一场会，否则视为两场不同会议
+
 /** 拉取 [startMs, endMs) 内开始的已结束会议 */
 async function fetchMeetings(startMs, endMs) {
   const { cookie, accountCorpId } = loadAuth();
@@ -203,48 +250,89 @@ async function processMeetings(dayMeetings, log) {
       continue;
     }
 
-    // 简单优先转写：同一会议号下，若既有转写又有录制，只上传转写、跳过录制
-    // （转写会议开始即自动生成、更完整）；若无转写则正常上传录制（兼容「只有录制没有转写」）。
-    // 仍仅按 record_id 去重，防增量窗口重叠导致的重复上传。
-    // ⚠️ 腾讯会议会把同一会议号下的多场不同会议归到同一 meeting_id；若其中一场是转写、另一场是录制，
-    //   录制那场会被跳过（按用户选择，接受此偶发丢不同会议数据的风险）。
-    const hasTrans = records.some(r => /^转写[_-]/.test(r.title || mSubject));
-    for (const rec of records) {
+    // 选稿策略：同一会议若同时有「转写」与「录制」两份逐字稿，先都抓取比对：
+    //   - 内容相似度高（>= SIM_THRESHOLD）→ 视为同一场会：保留内容更多的一份；
+    //     若两份互补（短份含有长份缺失的内容）则合并后存一份。
+    //   - 内容相似度低 → 实为同一会议号下的两场不同会议：两份各自独立上传，互不合并、互不丢弃。
+    //   - 只有一类 → 直接上传该类。
+    // 去重仍按 record_id；每上传一份就把涉及的所有 record_id 标记已处理，避免增量窗口重叠重复上传。
+    const transRecs = records.filter(r => /^转写[_-]/.test(r.title || mSubject));
+    const recRecs = records.filter(r => !/^转写[_-]/.test(r.title || mSubject));
+    const hasBoth = transRecs.length > 0 && recRecs.length > 0;
+
+    // 抓取：至少一条未处理才抓；若两类都有则需两边都抓来比对（即便某条已上传过也要取文本比对）
+    const toFetch = hasBoth ? records : records.filter(r => !processed.has(r.record_id));
+    const fetched = [];
+    for (const rec of toFetch) {
       const rid = rec.record_id;
       const rTitle = rec.title || mSubject;
       const kind = /^转写[_-]/.test(rTitle) ? '转写' : '录制';
-      // 转写优先：存在转写时，录制记录直接跳过（不抓取、不上传）
-      if (hasTrans && kind === '录制') {
-        skipCount++;
-        log(`    ⏭️ 转写优先，跳过录制：${rTitle}`);
-        results.push({ record_id: rid, subject: rTitle, time: mTime, ok: true, skipped: true, reason: '转写优先' });
-        lines.push(`| ${mTime} | ${rTitle} | 录制 | ⏭️ 转写优先 |`);
-        continue;
-      }
-      if (processed.has(rid)) {
-        skipCount++;
-        log(`    ⏭️ 已上传过，跳过：${rTitle}`);
-        results.push({ record_id: rid, subject: rTitle, time: mTime, ok: true, skipped: true, reason: '已上传过' });
-        lines.push(`| ${mTime} | ${rTitle} | ${kind} | ⏭️ 已上传过 |`);
-        continue;
-      }
       try {
         const t = await fetchTranscript(rid, { authPath: AUTH_PATH });
-        const title = sanitize(t.meta.subject) || sanitize(rTitle);
-        const up = await uploadMarkdown(title, t.text);
-        okCount++;
-        processed.add(rid);
-        saveProcessed(processed);
-        log(`    ✅ ${up.title}（${t.paragraphs.length} 段${t.meta.summary ? '，含AI纪要' : ''}）`);
-        results.push({ record_id: rid, subject: rTitle, time: mTime, kind, ok: true, title: up.title, paragraphs: t.paragraphs.length, hasSummary: !!t.meta.summary });
-        lines.push(`| ${mTime} | ${up.title} | ${kind} | ✅ ${t.paragraphs.length} 段 |`);
+        fetched.push({ rid, rTitle, kind, t, paragraphs: t.paragraphs.length, text: t.text, hasSummary: !!t.meta.summary });
       } catch (e) {
         failCount++;
-        log(`    ❌ ${rTitle} — ${e.message.slice(0, 150)}`);
+        log(`    ❌ 抓取失败 ${rTitle} — ${e.message.slice(0, 120)}`);
         results.push({ record_id: rid, subject: rTitle, time: mTime, kind, ok: false, error: e.message });
-        lines.push(`| ${mTime} | ${rTitle} | ${kind} | ❌ ${e.message.slice(0, 60)} |`);
       }
       await new Promise(r => setTimeout(r, 700));
+    }
+
+    // 单条上传（含已处理跳过）
+    const uploadOne = async (f) => {
+      if (processed.has(f.rid)) {
+        skipCount++;
+        log(`    ⏭️ 已上传过，跳过：${f.rTitle}`);
+        results.push({ record_id: f.rid, subject: f.rTitle, time: mTime, ok: true, skipped: true, reason: '已上传过' });
+        lines.push(`| ${mTime} | ${f.rTitle} | ${f.kind} | ⏭️ 已上传过 |`);
+        return;
+      }
+      const title = sanitize(f.t.meta.subject) || sanitize(f.rTitle);
+      const up = await uploadMarkdown(title, f.text);
+      okCount++;
+      processed.add(f.rid);
+      saveProcessed(processed);
+      log(`    ✅ ${up.title}（${f.paragraphs} 段${f.hasSummary ? '，含AI纪要' : ''}）`);
+      results.push({ record_id: f.rid, subject: f.rTitle, time: mTime, kind: f.kind, ok: true, title: up.title, paragraphs: f.paragraphs, hasSummary: f.hasSummary });
+      lines.push(`| ${mTime} | ${up.title} | ${f.kind} | ✅ ${f.paragraphs} 段 |`);
+    };
+
+    if (hasBoth && fetched.length >= 2) {
+      const tF = fetched.find(f => f.kind === '转写');
+      const rF = fetched.find(f => f.kind === '录制');
+      const sim = textSimilarity(tF.text, rF.text);
+      if (sim >= SIM_THRESHOLD) {
+        // 同一场会：取内容更多者；若互补则合并
+        const longer = rF.text.length >= tF.text.length ? rF : tF;
+        const shorter = longer === rF ? tF : rF;
+        let outText = longer.text, outParas = longer.paragraphs, note = '保留内容较多的一份';
+        if (uniqueFraction(shorter.text, longer.text) > 0.15) {
+          outParas = mergeParagraphs(longer.t.paragraphs, shorter.t.paragraphs);
+          outText = formatTranscript(outParas, longer.t.meta);
+          note = '综合两份互补内容';
+        }
+        const title = sanitize(longer.t.meta.subject) || sanitize(mSubject);
+        try {
+          const up = await uploadMarkdown(title, outText);
+          okCount++;
+          for (const f of fetched) processed.add(f.rid);
+          saveProcessed(processed);
+          log(`    ✅ ${up.title}（${outParas.length} 段｜${note}｜相似度 ${(sim * 100).toFixed(0)}%）`);
+          results.push({ meeting_id: m.meeting_id, subject: mSubject, time: mTime, ok: true, title: up.title, paragraphs: outParas.length, merged: note });
+          lines.push(`| ${mTime} | ${up.title} | 综合 | ✅ ${outParas.length} 段｜${note} |`);
+        } catch (e) {
+          failCount++;
+          log(`    ❌ 合并上传失败 ${mSubject} — ${e.message.slice(0, 120)}`);
+          results.push({ meeting_id: m.meeting_id, subject: mSubject, time: mTime, ok: false, error: e.message });
+          lines.push(`| ${mTime} | ${mSubject} | 综合 | ❌ ${e.message.slice(0, 60)} |`);
+        }
+      } else {
+        // 实为两场不同会议：各自独立上传
+        for (const f of fetched) await uploadOne(f);
+      }
+    } else {
+      // 单边或抓取不全：逐条上传未处理的
+      for (const f of fetched) await uploadOne(f);
     }
   }
   return { ok: okCount, fail: failCount, skipped: skipCount, noRecord: noRecordCount, results, lines };

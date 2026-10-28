@@ -311,4 +311,4 @@ if (require.main === module) {
   })();
 }
 
-module.exports = { fetchTranscript, normalizeInput, extractMeetingLinks, resolveUUID, getMeetingInfo, getSummary, getUniRecordId, getRecordingId, getTranscript };
+module.exports = { fetchTranscript, normalizeInput, extractMeetingLinks, resolveUUID, getMeetingInfo, getSummary, getUniRecordId, getRecordingId, getTranscript, formatTranscript };
