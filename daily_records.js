@@ -305,7 +305,7 @@ async function processMeetings(dayMeetings, log) {
         // 同一场会：取内容更多者；若互补则合并
         const longer = rF.text.length >= tF.text.length ? rF : tF;
         const shorter = longer === rF ? tF : rF;
-        let outText = longer.text, outParas = longer.paragraphs, note = '保留内容较多的一份';
+        let outText = longer.text, outParas = longer.t.paragraphs, note = '保留内容较多的一份';
         if (uniqueFraction(shorter.text, longer.text) > 0.15) {
           outParas = mergeParagraphs(longer.t.paragraphs, shorter.t.paragraphs);
           outText = formatTranscript(outParas, longer.t.meta);
