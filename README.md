@@ -1,5 +1,7 @@
 # 腾讯会议 · 录制/转写自动导出（tencent-meeting-auto）
 
+[English](./README.en.md) | **简体中文**
+
 > 一键把腾讯会议已结束会议的**录制 / 转写逐字稿**导出为 Markdown → 自动上传 **IMA 知识库** → 企业微信每日简报。
 > 跑在 GitHub Actions 上：**无需服务器、无需浏览器**，增量去重、登录态自轮换。
 

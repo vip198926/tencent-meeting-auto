@@ -1,8 +1,8 @@
 # 腾讯会议转写调度：云端版 → GitHub Actions 迁移与运维手册
 
 > 文档生成时间：2026-10-22 23:44 (GMT+8)
-> 适用仓库：`vip198926/tencent-meeting-auto`（private）
-> 本地工程目录：`<work-dir>`（云端版 `ctm-cloud/`、GitHub 版 `ctm-github/`）
+> 适用仓库：`vip198926/tencent-meeting-auto`
+> 目录约定：`ctm-cloud/`（云端版，已停用定时器）与 `ctm-github/`（本仓库）并列存放于本地工作目录
 
 ---
 
@@ -77,7 +77,7 @@ tencent-meeting-auto/
 
 **重设方法**（仅当 Secret 失效时）：
 ```bash
-cd <work-dir>ctm-github
+cd tencent-meeting-auto
 GITHUB_PAT=<你的PAT> node set_secrets.js
 # 用完该 PAT 立即到 GitHub 撤销
 ```
@@ -137,7 +137,7 @@ GH_DISPATCH_TOKEN=<FINE_GRAINED_PAT> bash trigger_dispatch.sh [patrol|daily|all]
 > 准备工作：注册/登录 https://cron-job.org；**账号 → Settings → Timezone 设为 `UTC`**（若设 `Asia/Shanghai`，则下方时间改填 `03:36` / `09:36`）。
 >
 > 所需 token —— fine-grained PAT，仅选本仓库 `tencent-meeting-auto`，授予 **Actions: Read and write**（旧 classic PAT 已撤销，与此无关）。
-> 真实值见仓库外文件 `outputs/_ctm/cronjob_setup.md`（不入库）。下文 `Authorization` 行的 `<FINE_GRAINED_PAT>` 即替换为此值。
+> 真实值见仓库外私密文件 `cronjob_setup.md`（不入库）。下文 `Authorization` 行的 `<FINE_GRAINED_PAT>` 即替换为此值。
 
 - **Job 1 — 巡检 patrol（北京时间 次日 03:36）**
   - **URL**：`https://api.github.com/repos/vip198926/tencent-meeting-auto/actions/workflows/patrol.yml/dispatches`
@@ -213,8 +213,8 @@ const CLOUD_SCHEDULER_ENABLED = false;  // 已迁 GitHub；改 true 可恢复
 
 `/api/health` 新增 `scheduler_enabled` 字段便于验证（实测 `scheduler_enabled:false`、`inc_running:false`）。
 
-- 发布地址（不变）：`https://<your-deployment-host>/`
-- 同 appId：`<your-app-id>`
+- 发布地址：`<你自己的托管地址>`（本文不记录真实域名）
+- 同 appId：`<你的 appId>`
 
 ---
 
@@ -252,7 +252,7 @@ PAT 安全属性（设置时即遵循）：仅 `repo` 权限、7 天过期；用
 
 **回滚到云端版（如需）**：
 1. 云端 `server.js` 把 `CLOUD_SCHEDULER_ENABLED` 改回 `true`；
-2. 重新发布 `<work-dir>ctm-cloud`；
+2. 重新发布 `ctm-cloud` 目录；
 3. 在 GitHub 仓库 **Settings → Actions → Disable** 两个 workflow（或直接删除 `.github/workflows/` 下两个文件）。
 4. 按「部署四步铁律」对齐 daily/ 状态，避免重复上传。
 
