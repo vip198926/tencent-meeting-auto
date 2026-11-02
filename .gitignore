@@ -3,3 +3,7 @@ auth_state.json
 ima_creds.json
 node_modules/
 *.log
+
+# 真实会议记录 / 运行日志（含隐私，绝不进仓库；本机另存备份）
+daily/records_*
+daily/run_log.jsonl
