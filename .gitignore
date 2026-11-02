@@ -7,3 +7,9 @@ node_modules/
 # 真实会议记录 / 运行日志（含隐私，绝不进仓库；本机另存备份）
 daily/records_*
 daily/run_log.jsonl
+
+# 一次性本地调试脚本 / 私人笔记（不进仓库）
+compare_two.js
+quick_check.js
+ys_notes.txt
+*.before_login

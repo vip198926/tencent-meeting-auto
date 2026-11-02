@@ -15,8 +15,10 @@ const BASE_URL = 'https://ima.qq.com';
 const API_BASE = '/openapi/wiki/v1';
 const SKILL_VERSION = '1.1.10';
 
-const DEFAULT_KB_ID = 'ima_kb_3nebCJv6'; // DY知识库（IMA 2026-10-23 轮换后的新 ID；旧 base64 格式 ID 已失效 code=220004）
-const DEFAULT_FOLDER_ID = 'folder_7479402237546408';                  // 腾讯会议转写
+// 可通过环境变量 IMA_KB_ID / IMA_FOLDER_ID 覆盖（Fork 者填自己的知识库/文件夹 ID）；
+// 未设置时回退到作者默认值，行为与之前完全一致。
+const DEFAULT_KB_ID = process.env.IMA_KB_ID || 'ima_kb_3nebCJv6'; // DY知识库（IMA 2026-10-23 轮换后的新 ID；旧 base64 格式 ID 已失效 code=220004）
+const DEFAULT_FOLDER_ID = process.env.IMA_FOLDER_ID || 'folder_7479402237546408'; // 腾讯会议转写
 
 function getCreds() {
   // 优先级：环境变量 -> 同目录 ima_creds.json（云端托管打包用）-> ~/.config/ima/*

@@ -21,8 +21,9 @@ const https = require('https');
 const path = require('path');
 const { seal } = require('tweetsodium');
 
-const OWNER = 'vip198926';
-const REPO = 'tencent-meeting-auto';
+// Actions 里自带 GITHUB_REPOSITORY（owner/repo），Fork 后自动指向自己的仓库；
+// 本地无该变量时回退到作者默认值，行为与之前完全一致。
+const [OWNER, REPO] = (process.env.GITHUB_REPOSITORY || 'vip198926/tencent-meeting-auto').split('/');
 // 支持从文件读取 PAT（GITHUB_PAT_FILE），避免把明文写进命令行/进程参数。
 const PAT = process.env.GITHUB_PAT
   || (process.env.GITHUB_PAT_FILE && fs.existsSync(process.env.GITHUB_PAT_FILE)
