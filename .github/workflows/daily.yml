@@ -69,6 +69,15 @@ jobs:
             sleep 5
           done
 
+      - name: 自动轮换（加密回写登录态到 Secret）
+        if: always()
+        env:
+          GITHUB_PAT: ${{ secrets.SECRETS_WRITE_PAT }}
+          SECRET_NAME: CTM_AUTH_STATE_RAW
+        run: |
+          export AUTH_SRC="$RUNNER_TEMP/auth_state.json"
+          npm install tweetsodium --no-save --no-audit --no-fund 2>/dev/null && node rotate_secret.js || echo "::warning::轮换步骤异常（不影响会议处理），请检查 SECRETS_WRITE_PAT 是否有效"
+
       - name: 清理临时凭证
         if: always()
         run: rm -f "$RUNNER_TEMP/auth_state.json"
