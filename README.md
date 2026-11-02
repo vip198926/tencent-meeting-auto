@@ -1,4 +1,17 @@
-# tencent-meeting-auto
+# 腾讯会议 · 录制/转写自动导出（tencent-meeting-auto）
+
+> 一键把腾讯会议已结束会议的**录制 / 转写逐字稿**导出为 Markdown → 自动上传 **IMA 知识库** → 企业微信每日简报。
+> 跑在 GitHub Actions 上：**无需服务器、无需浏览器**，增量去重、登录态自轮换。
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![GitHub Actions](https://github.com/vip198926/tencent-meeting-auto/actions/workflows/daily.yml/badge.svg)](https://github.com/vip198926/tencent-meeting-auto/actions)
+[![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
+
+**关键词**：腾讯会议 · 会议纪要 · 逐字稿 · 转写导出 · 录制下载 · IMA 知识库 · 企业微信通知 · GitHub Actions 自动化
+
+**English**：Auto-export Tencent Meeting recordings & transcripts to Markdown, upload to IMA knowledge base, and push a daily digest via WeCom — fully automated on GitHub Actions (no server, no browser).
+
+---
 
 把**腾讯会议**里已结束会议的**录制 / 转写（逐字稿）**自动抓取下来，整理成 Markdown，上传到 **IMA 知识库**，并通过**企业微信机器人**推送每日简报。
 
@@ -389,4 +402,6 @@ GITHUB_PAT=<你的PAT> node set_secrets.js     # 或只更新 CTM_AUTH_STATE_RAW
 
 ## 许可
 
-未附许可证。若你计划公开分发，建议补充一个（如 MIT）。使用即表示你自行承担相关风险。
+[MIT](./LICENSE) © vip198926
+
+可自由使用、修改、分发（含商用），保留版权声明即可。软件按"现状"提供，使用风险自负。
