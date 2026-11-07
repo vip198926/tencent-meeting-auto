@@ -43,6 +43,7 @@
 - [配置项一览](#配置项一览)
 - [去重与选稿策略](#去重与选稿策略)
 - [登录态维护与自动轮换](#登录态维护与自动轮换)
+- [可选：自动收故事](#可选自动收故事)
 - [目录结构](#目录结构)
 - [故障排查](#故障排查)
 - [安全与隐私](#安全与隐私)
@@ -349,6 +350,45 @@ GITHUB_PAT=<你的PAT> node set_secrets.js     # 或只更新 CTM_AUTH_STATE_RAW
 
 ---
 
+## 可选：自动收故事
+
+这是一个**默认关闭**的可选环节。凭证未配齐时 `story_collect.js` 静默跳过，会议转写管线行为完全不变。
+
+开启后，09:36 管线上传逐字稿的同时，会把正文交接给同一次运行里的收故事步骤：规则召回候选段落 → LLM 抽取结构化故事 → **原话逐字命中校验** → 增量追加到两份飞书文档 → 打 IMA 标签记账 → 企微简报。逐字稿不进仓库、不进日志、不进 artifact。
+
+### 需要新增的 Secrets
+
+| Secret | 用途 |
+|---|---|
+| `LLM_API_KEY` | LLM API Key（OpenAI 兼容格式） |
+| `FEISHU_APP_ID` / `FEISHU_APP_SECRET` | 飞书自建应用凭据 |
+| `FEISHU_DOC_PEOPLE` / `FEISHU_DOC_EFFECT` | 两份飞书文档的 `document_id`（从文档 URL 里取） |
+| `STORY_NOTE_ID` | IMA 索引笔记的 `note_id` |
+| `STORY_KB_ID` | IMA 知识库 ID（可选，不设则用 `IMA_KB_ID` 或默认库） |
+
+可选 Repository Variables：`LLM_BASE_URL`（默认 `https://api.deepseek.com`）、`LLM_MODEL`（默认 `deepseek-chat`）。任何 OpenAI 兼容的 `/chat/completions` 端点都能用。
+
+### 飞书授权三步（缺一不可）
+
+1. 在飞书开放平台建自建应用，开通 `docx:document:readonly` 与 `docx:document:write_only`，发布版本。
+2. 把应用的 bot 加为**两份文档**的协作者（可编辑）。只开 API 权限、不加协作者会返回 403。
+3. 把 App ID / App Secret 填进上面两个 Secret。
+
+### 质量护栏
+
+- **原话硬校验**：LLM 返回的每条引文必须在逐字稿里逐字命中，否则整条丢弃、不写入飞书。这是对「不许编造」的机器可执行兜底。
+- **不 overwrite**：只用 `children` 追加块到文档末尾，绝不重写 38 万字原文；每次追加用确定性 `client_token` 保证重试幂等。
+- **失败不打标签**：任何一步失败都不打「故事已收」，下轮按 `record_id` 重抓正文自动重试。
+- **台账** `daily/story_state.json` 只存内容指纹、`media_id`、`record_id`、`block_id` 与时间戳，不含人名、原话、会议主题。
+
+### v1 的边界
+
+人物篇与效果故事**一律追加到文档末尾**，不改目录锚点、不改章节条数、不做「并入老条目」的语义合并。理由：那需要解析 38 万字既有文档并做原地改写，无人值守下风险远高于收益。判重靠内容指纹台账。
+
+### 隐私提醒
+
+开启此功能等于把会议逐字稿（含真实姓名、健康状况、消费信息）发送给**第三方 LLM 服务商**，属于数据出域。与仓库是否公开无关。请确认所选厂商的 API 数据处理条款，并仅处理你有权处理的会议内容。
+
 ## 目录结构
 
 ```
@@ -398,6 +438,8 @@ GITHUB_PAT=<你的PAT> node set_secrets.js     # 或只更新 CTM_AUTH_STATE_RAW
 - **Public 仓库也安全**：仓库 Secrets 仅协作者可见，Fork / PR **无法读取**；从 Fork 发起的 PR 默认拿不到 Secrets。
 - **PAT 建议**：fine-grained、仅授权本仓库、`Secrets: write`（+ `Actions: write`），设**长周期/无过期**并定期轮换。
 - **会议内容属隐私**：默认不把逐字稿提交进仓库（只提交去重 ID 与进度）；如需审计请自行评估。
+- **公开的 Actions 日志**：public 仓库的 run 日志任何人可见。所有代码都只打印数量与错误码，不打印逐字稿、LLM 输出、飞书响应或人名；`story_collect.js` 的台账也只写指纹与不透明 ID。若你要加日志，务必保持这条约束。
+- **workflow 触发器**：只有 `workflow_dispatch`，没有 `pull_request` / `push`。外部 PR 不会触发带 Secrets 的运行。改动触发器前先评估这一条。
 - 本项目依赖腾讯会议**非公开网页接口**，请仅用于**你有权访问**的会议，遵守相关服务条款。
 
 ---

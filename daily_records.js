@@ -28,6 +28,17 @@ const { pushDailyReport: pushWecom } = require('./wecom_webhook');
 const { pushDailyReport: pushPushplus } = require('./pushplus');
 const { tokenRemainingDays } = require('./token_refresh');
 
+/**
+ * 可选交接：把本轮上传成功的逐字稿交给「收故事」步骤。
+ * 仅当 workflow 设置了 STORY_BATCH_FILE 时生效；文件位于 $RUNNER_TEMP，
+ * runner 结束即销毁，绝不进仓库、日志或 artifact。失败不影响主管线。
+ */
+function emitStoryBatch(entry) {
+  const p = process.env.STORY_BATCH_FILE;
+  if (!p) return;
+  try { fs.appendFileSync(p, JSON.stringify(entry) + '\n', 'utf8'); } catch { /* 忽略 */ }
+}
+
 // 登录态剩余天数（失败返回 null，不阻断主流程）
 function safeTokenDays() {
   try { const d = tokenRemainingDays(AUTH_PATH); return typeof d === 'number' ? Math.round(d * 10) / 10 : null; } catch { return null; }
@@ -289,6 +300,7 @@ async function processMeetings(dayMeetings, log) {
       }
       const title = sanitize(f.t.meta.subject) || sanitize(f.rTitle);
       const up = await uploadMarkdown(title, f.text);
+      emitStoryBatch({ media_id: up.media_id, record_id: f.rid, text: f.text });
       okCount++;
       processed.add(f.rid);
       saveProcessed(processed);
@@ -314,6 +326,7 @@ async function processMeetings(dayMeetings, log) {
         const title = sanitize(longer.t.meta.subject) || sanitize(mSubject);
         try {
           const up = await uploadMarkdown(title, outText);
+          emitStoryBatch({ media_id: up.media_id, record_id: tF.rid, text: outText });
           okCount++;
           for (const f of fetched) processed.add(f.rid);
           saveProcessed(processed);

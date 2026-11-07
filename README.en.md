@@ -74,6 +74,12 @@ Design choices worth knowing:
 - Optional: WeCom group bot webhook, or a PushPlus token
 - For the one-time login capture: local Chrome/Edge (Playwright)
 
+## Optional: automated story collection
+
+Disabled by default. When `LLM_API_KEY`, Feishu app credentials and document IDs are configured, each run also extracts customer stories from newly uploaded transcripts, appends them to two Feishu docs and tags the source in IMA. Quotes must match the transcript verbatim or the item is discarded. Without these credentials the step silently skips and the transcript pipeline is unchanged. See the Chinese README for the full setup.
+
+**Note:** enabling this sends transcript content (which may contain personal and health information) to a third-party LLM provider. Review that provider's data policy first.
+
 ## Quick start
 
 **1. Clone**
