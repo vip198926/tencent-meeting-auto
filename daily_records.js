@@ -27,6 +27,13 @@ const { uploadMarkdown } = require('./ima_upload');
 const { pushDailyReport: pushWecom } = require('./wecom_webhook');
 const { pushDailyReport: pushPushplus } = require('./pushplus');
 const { tokenRemainingDays } = require('./token_refresh');
+const { maskId, safeErr } = require('./log_safe');
+
+/**
+ * 公开日志约定：本文件所有 log() 只输出数量/状态/段数/错误码与脱敏短 ID。
+ * 会议主题、标题、会议号、逐字稿正文、接口响应体一律不进 GitHub Actions 日志。
+ * 完整明细仍写入本地 records_*.md 并推送企业微信（私有通道）。
+ */
 
 /**
  * 可选交接：把本轮上传成功的逐字稿交给「收故事」步骤。
@@ -239,7 +246,7 @@ async function processMeetings(dayMeetings, log) {
     const m = dayMeetings[i];
     const mTime = fmt(m.begin_time);
     const mSubject = m.subject || '(无主题)';
-    log(`[${i + 1}/${dayMeetings.length}] ${mTime} | ${mSubject} | 会议号 ${m.meeting_code}`);
+    log(`[${i + 1}/${dayMeetings.length}] ${mTime} | 会议 ${maskId(m.meeting_id)}`);
 
     // 查该会的录制记录（需要 we_meet_token）
     let records = [];
@@ -249,9 +256,9 @@ async function processMeetings(dayMeetings, log) {
       const rres = await req('POST', rurl, { page_size: '20', page_index: '1', meeting_id: String(m.meeting_id) }, cookie);
       const rj = JSON.parse(rres.body);
       if (rj.code === 0 && rj.data) records = rj.data.records || [];
-      else log(`    ⚠️ 录制列表查询返回 code=${rj.code}: ${(rj.err_detail || rj.msg || '').slice(0, 100)}`);
+      else log(`    ⚠️ 录制列表查询返回 ${safeErr('code=' + rj.code)}`);
     } catch (e) {
-      log(`    ⚠️ 录制列表查询异常: ${e.message.slice(0, 100)}`);
+      log(`    ⚠️ 录制列表查询异常: ${safeErr(e)}`);
     }
 
     if (!records.length) {
@@ -283,7 +290,7 @@ async function processMeetings(dayMeetings, log) {
         fetched.push({ rid, rTitle, kind, t, paragraphs: t.paragraphs.length, text: t.text, hasSummary: !!t.meta.summary });
       } catch (e) {
         failCount++;
-        log(`    ❌ 抓取失败 ${rTitle} — ${e.message.slice(0, 120)}`);
+        log(`    ❌ 抓取失败 记录 ${maskId(rid)} — ${safeErr(e)}`);
         results.push({ record_id: rid, subject: rTitle, time: mTime, kind, ok: false, error: e.message });
       }
       await new Promise(r => setTimeout(r, 700));
@@ -293,7 +300,7 @@ async function processMeetings(dayMeetings, log) {
     const uploadOne = async (f) => {
       if (processed.has(f.rid)) {
         skipCount++;
-        log(`    ⏭️ 已上传过，跳过：${f.rTitle}`);
+        log(`    ⏭️ 已上传过，跳过：记录 ${maskId(f.rid)}`);
         results.push({ record_id: f.rid, subject: f.rTitle, time: mTime, ok: true, skipped: true, reason: '已上传过' });
         lines.push(`| ${mTime} | ${f.rTitle} | ${f.kind} | ⏭️ 已上传过 |`);
         return;
@@ -304,7 +311,7 @@ async function processMeetings(dayMeetings, log) {
       okCount++;
       processed.add(f.rid);
       saveProcessed(processed);
-      log(`    ✅ ${up.title}（${f.paragraphs} 段${f.hasSummary ? '，含AI纪要' : ''}）`);
+      log(`    ✅ 已上传 记录 ${maskId(f.rid)}（${f.paragraphs} 段${f.hasSummary ? '，含AI纪要' : ''}）`);
       results.push({ record_id: f.rid, subject: f.rTitle, time: mTime, kind: f.kind, ok: true, title: up.title, paragraphs: f.paragraphs, hasSummary: f.hasSummary });
       lines.push(`| ${mTime} | ${up.title} | ${f.kind} | ✅ ${f.paragraphs} 段 |`);
     };
@@ -330,12 +337,12 @@ async function processMeetings(dayMeetings, log) {
           okCount++;
           for (const f of fetched) processed.add(f.rid);
           saveProcessed(processed);
-          log(`    ✅ ${up.title}（${outParas.length} 段｜${note}｜相似度 ${(sim * 100).toFixed(0)}%）`);
+          log(`    ✅ 已上传 会议 ${maskId(m.meeting_id)}（${outParas.length} 段｜${note}｜相似度 ${(sim * 100).toFixed(0)}%）`);
           results.push({ meeting_id: m.meeting_id, subject: mSubject, time: mTime, ok: true, title: up.title, paragraphs: outParas.length, merged: note });
           lines.push(`| ${mTime} | ${up.title} | 综合 | ✅ ${outParas.length} 段｜${note} |`);
         } catch (e) {
           failCount++;
-          log(`    ❌ 合并上传失败 ${mSubject} — ${e.message.slice(0, 120)}`);
+          log(`    ❌ 合并上传失败 会议 ${maskId(m.meeting_id)} — ${safeErr(e)}`);
           results.push({ meeting_id: m.meeting_id, subject: mSubject, time: mTime, ok: false, error: e.message });
           lines.push(`| ${mTime} | ${mSubject} | 综合 | ❌ ${e.message.slice(0, 60)} |`);
         }
@@ -412,8 +419,8 @@ async function runIncremental(opts = {}) {
     try {
       const r = await notify(summary);
       if (r.via) log(`[NOTIFY] 日报已推送（${r.via}）`);
-      else log('[NOTIFY] 无可用推送通道：' + (r.errors || []).join('; '));
-    } catch (e) { log('[NOTIFY] 推送失败: ' + e.message.slice(0, 100)); }
+      else log('[NOTIFY] 无可用推送通道：' + (r.errors || []).map(safeErr).join('; '));
+    } catch (e) { log('[NOTIFY] 推送失败: ' + safeErr(e)); }
   }
   return summary;
 }
@@ -446,8 +453,8 @@ async function runDaily(targetDate, opts = {}) {
     try {
       const r = await notify(summary);
       if (r.via) log(`[NOTIFY] 日报已推送（${r.via}）`);
-      else log('[NOTIFY] 无可用推送通道：' + (r.errors || []).join('; '));
-    } catch (e) { log('[NOTIFY] 推送失败: ' + e.message.slice(0, 100)); }
+      else log('[NOTIFY] 无可用推送通道：' + (r.errors || []).map(safeErr).join('; '));
+    } catch (e) { log('[NOTIFY] 推送失败: ' + safeErr(e)); }
   }
   // 按天补跑：若该日结束时间晚于当前进度，推进进度（避免增量重复拉）
   const prog = loadProgress();
@@ -464,8 +471,8 @@ if (require.main === module) {
   const arg = process.argv[2];
   const noNotify = process.argv.includes('--no-notify');
   if (arg === 'inc' || arg === 'incremental') {
-    runIncremental({ notify: !noNotify }).catch(e => { console.error('FATAL', e.message); process.exit(1); });
+    runIncremental({ notify: !noNotify }).catch(e => { console.error('FATAL', safeErr(e)); process.exit(1); });
   } else {
-    runDaily(arg, { notify: !noNotify }).catch(e => { console.error('FATAL', e.message); process.exit(1); });
+    runDaily(arg, { notify: !noNotify }).catch(e => { console.error('FATAL', safeErr(e)); process.exit(1); });
   }
 }

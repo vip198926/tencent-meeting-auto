@@ -1,4 +1,5 @@
 'use strict';
+const { safeErr } = require('./log_safe');
 /**
  * rotate_secret.js — 通用 GitHub Repo Secret 写入器（登录态自动轮换 + 一次性初始化）
  *
@@ -84,4 +85,4 @@ function remainingDaysOf(stateText) {
   await api('PUT', `/repos/${OWNER}/${REPO}/actions/secrets/${SECRET_NAME}`, { encrypted_value, key_id });
   const days = remainingDaysOf(value);
   console.log(`✅ 已写回 Secret: ${SECRET_NAME}（明文长度 ${value.length}${days !== null ? `，token 剩余约 ${days} 天` : ''}）`);
-})().catch(e => { console.error('❌ 写回 Secret 失败: ' + e.message); process.exit(1); });
+})().catch(e => { console.error('❌ 写回 Secret 失败: ' + safeErr(e)); process.exit(1); });

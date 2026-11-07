@@ -15,6 +15,7 @@
 const fs = require('fs');
 const https = require('https');
 const crypto = require('crypto');
+const { maskId, safeErr } = require('./log_safe');
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 // 支持：/ctm/<code>、/crm/<code>、/cw/<code>、/ct/<code>
@@ -300,12 +301,13 @@ if (require.main === module) {
     if (!input) { console.error('用法: node ctm_fetch.js <短码或分享链接> [输出.md]'); process.exit(1); }
     try {
       const r = await fetchTranscript(input);
-      console.log(`✅ 成功：${r.paragraphs.length} 段转写` + (r.meta.subject ? `｜主题：${r.meta.subject}` : ''));
-      console.log(`   meeting_id=${r.meta.meeting_id} recording_id=${r.meta.recording_id} uuid=${r.meta.uuid}`);
+      // CLI 输出同样按公开日志标准脱敏：主题 / 会议号 / 正文一律不打印
+      console.log(`✅ 成功：${r.paragraphs.length} 段转写（主题与会议号已脱敏）`);
+      console.log(`   会议 ${maskId(r.meta.meeting_id)} | 录制 ${maskId(r.meta.recording_id)}`);
       if (out) { fs.writeFileSync(out, r.text, 'utf8'); console.log('   已写入', out); }
-      else console.log('\n' + r.text.slice(0, 1500) + '\n…');
+      else console.log(`   正文 ${r.text.length} 字（不输出到日志；追加输出文件参数可查看）`);
     } catch (e) {
-      console.error('❌ 失败：', e.message);
+      console.error('❌ 失败：', safeErr(e));
       process.exit(1);
     }
   })();

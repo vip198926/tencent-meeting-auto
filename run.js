@@ -18,6 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const { runIncremental, runDaily, bjDateString } = require('./daily_records');
 const { refreshToken } = require('./token_refresh');
+const { safeErr } = require('./log_safe');
 
 const AUTH_PATH = process.env.CTM_AUTH_STATE && process.env.CTM_AUTH_STATE.endsWith('.json')
   ? process.env.CTM_AUTH_STATE
@@ -32,7 +33,7 @@ function writeRunLog(entry) {
     fs.mkdirSync(OUT_DIR, { recursive: true });
     fs.appendFileSync(RUN_LOG, JSON.stringify(entry) + '\n', 'utf8');
   } catch (e) {
-    console.error('[RUN] 写心跳日志失败: ' + e.message);
+    console.error('[RUN] 写心跳日志失败: ' + safeErr(e));
   }
 }
 
@@ -43,7 +44,7 @@ async function main() {
   // 0. 若以 RAW JSON 提供登录态，则写出到 AUTH_PATH（workflow 已指向 $RUNNER_TEMP）
   if (process.env.CTM_AUTH_STATE_RAW) {
     fs.writeFileSync(AUTH_PATH, process.env.CTM_AUTH_STATE_RAW, 'utf8');
-    console.log('[RUN] 已从 Secret 写出登录态 -> ' + AUTH_PATH);
+    console.log('[RUN] 已从 Secret 写出登录态');
   } else if (!fs.existsSync(AUTH_PATH)) {
     throw new Error('缺少登录态：未提供 CTM_AUTH_STATE_RAW 且 ' + AUTH_PATH + ' 不存在');
   }
@@ -51,10 +52,12 @@ async function main() {
   // 1. 纯 HTTP 续期（延长约 7 天，无需浏览器）
   try {
     const r = await refreshToken(AUTH_PATH);
-    if (r.refreshed) console.log(`[RUN] ✅ 登录态已续期至 ${r.token_expire}（${r.verify}）`);
-    else console.log(`[RUN] ℹ️ 登录态未刷新：${r.reason}（将在后续接口调用中验证）`);
+    // 续期返回的 reason/verify 可能夹带响应体或 URL，公开日志只留类别与错误码
+    const verify = String(r.verify || '').startsWith('OK') ? 'OK' : safeErr(r.verify);
+    if (r.refreshed) console.log(`[RUN] ✅ 登录态已续期至 ${r.token_expire}（${verify}）`);
+    else console.log(`[RUN] ℹ️ 登录态未刷新：${safeErr(r.reason)}（将在后续接口调用中验证）`);
   } catch (e) {
-    console.log('[RUN] ⚠️ 续期异常：' + e.message.slice(0, 200) + '（继续尝试，可能仍可用）');
+    console.log('[RUN] ⚠️ 续期异常：' + safeErr(e) + '（继续尝试，可能仍可用）');
   }
 
   // 2. 跑管线
@@ -83,7 +86,7 @@ async function main() {
   } catch (e) {
     status = 'error';
     errMsg = (e && e.message) ? e.message.slice(0, 500) : String(e);
-    console.error('[RUN] FATAL ' + errMsg);
+    console.error('[RUN] FATAL ' + safeErr(e));
   }
 
   // 心跳日志（成功/失败都写）
@@ -106,9 +109,9 @@ async function main() {
     try {
       const { pushDailyReport: pushWecom } = require('./wecom_webhook');
       const r = await pushWecom({ source: process.env.SOURCE || 'inc', date: bjDateString(0), error: errMsg });
-      console.log('[RUN] 已发送失败通知（wecom）: ' + JSON.stringify(r));
+      console.log('[RUN] 已发送失败通知（wecom）');
     } catch (e) {
-      console.error('[RUN] 失败通知发送异常: ' + e.message);
+      console.error('[RUN] 失败通知发送异常: ' + safeErr(e));
     }
   }
 

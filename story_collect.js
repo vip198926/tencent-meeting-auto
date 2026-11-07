@@ -22,6 +22,7 @@ const crypto = require('crypto');
 
 const lib = require('./story_lib');
 const llm = require('./story_llm');
+const { safeErr } = require('./log_safe');
 
 const STATE_FILE = process.env.STORY_STATE_FILE || path.join(__dirname, 'daily', 'story_state.json');
 const BATCH_FILE = process.env.STORY_BATCH_FILE || '';
@@ -38,10 +39,6 @@ const REQUIRED = [
 const missing = () => REQUIRED.filter(k => !process.env[k]);
 
 function log(...a) { console.log('[STORY]', ...a); }
-function safeErr(e) {
-  // 只保留固定文案 + 错误码；绝不把响应体、正文、token 带进日志
-  return String((e && e.message) || e).replace(/[^\x20-\x7E一-龥0-9=_-]/g, ' ').slice(0, 120);
-}
 
 // ---- 台账 ----
 function loadState() {
@@ -220,6 +217,14 @@ async function main() {
       const v = llm.validate(parsed, sel.body);
       stats.rejectedQuote += v.rejected.quote;
       stats.rejectedOther += v.rejected.product + v.rejected.fields + v.rejected.duplicate;
+
+      // 一份合格故事都没有：只打「无故事」标签，不写空索引、不碰两份正式文档
+      if (!v.effects.length && !v.people.length) {
+        if (rec.media_id) await lib.addTag(rec.media_id, TAG_NONE, KB_ID);
+        state.seen[fp] = { ts: rec.ts, stories: 0, media_id: rec.media_id };
+        stats.none++;
+        continue;
+      }
 
       const pBlocks = blocksForPeople(date, v.people);
       const eBlocks = blocksForEffects(date, v.effects);
