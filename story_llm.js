@@ -125,10 +125,9 @@ async function extractStories(picked) {
   const key = process.env.LLM_API_KEY;
   if (!key) throw new Error('缺少 LLM_API_KEY');
   const base = (process.env.LLM_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '');
-  const model = process.env.LLM_MODEL || 'deepseek-chat';
-  const { status, json } = await httpJson('POST', base + '/chat/completions', {
-    Authorization: 'Bearer ' + key,
-  }, {
+  // deepseek-chat / deepseek-reasoner 已于 2026-07-24 弃用；当前官方模型名为 deepseek-flash / deepseek-v4-pro。
+  const model = process.env.LLM_MODEL || 'deepseek-flash';
+  const payload = {
     model,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
@@ -137,7 +136,13 @@ async function extractStories(picked) {
     temperature: 0.1,
     max_tokens: 4000,
     stream: false,
-  }, 180000);
+  };
+  // DeepSeek V4 系列默认开启思考模式（effort=high）：temperature 不生效，且思维链会占用
+  // max_tokens 导致 content 为空。摘录是确定性任务，显式关闭；其它厂商端点不发送此字段。
+  if (/api\.deepseek\.com/i.test(base)) payload.thinking = { type: 'disabled' };
+  const { status, json } = await httpJson('POST', base + '/chat/completions', {
+    Authorization: 'Bearer ' + key,
+  }, payload, 180000);
   if (json.error) throw new Error(`LLM code=${json.error.code || status}`);
   const raw = json.choices?.[0]?.message?.content;
   if (!raw) throw new Error('LLM 返回为空');

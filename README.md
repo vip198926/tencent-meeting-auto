@@ -366,7 +366,14 @@ GITHUB_PAT=<你的PAT> node set_secrets.js     # 或只更新 CTM_AUTH_STATE_RAW
 | `STORY_NOTE_ID` | IMA 索引笔记的 `note_id` |
 | `STORY_KB_ID` | IMA 知识库 ID（可选，不设则用 `IMA_KB_ID` 或默认库） |
 
-可选 Repository Variables：`LLM_BASE_URL`（默认 `https://api.deepseek.com`）、`LLM_MODEL`（默认 `deepseek-chat`）。任何 OpenAI 兼容的 `/chat/completions` 端点都能用。
+### LLM 配置（Repository Variables）
+
+| Variable | DeepSeek | 阿里云百炼 |
+|---|---|---|
+| `LLM_BASE_URL` | `https://api.deepseek.com` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| `LLM_MODEL` | `deepseek-flash`（也可 `deepseek-v4-pro`） | `qwen-plus` |
+
+`LLM_API_KEY` 必须与所选厂商一致——**换厂商时这个 Secret 也要换**。两个 Variable 都不填时默认走 DeepSeek `https://api.deepseek.com` + `deepseek-flash`。任何 OpenAI 兼容的 `/chat/completions` 端点都能用；DeepSeek 端点会自动发送 `thinking: disabled`，避免默认思考模式吞掉输出预算、使 `temperature` 失效。
 
 ### 飞书授权三步（缺一不可）
 
