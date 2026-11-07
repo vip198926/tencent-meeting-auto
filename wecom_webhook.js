@@ -79,6 +79,7 @@ async function pushDailyReport(summary) {
     const detail = (lines || []).filter(Boolean).slice(0, 12).map(l => l.replace(/^\|\s*/, '').replace(/\s*\|\s*$/, ''));
     content = head
       + (extra.length ? '\n' + extra.join('\n') : '')
+      + (summary.story ? '\n' + String(summary.story) : '')
       + (detail.length ? `\n\n—— 明细 ——\n${detail.join('\n')}` : '');
   }
   return sendText(content);

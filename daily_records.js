@@ -61,6 +61,28 @@ async function notify(summary) {
   return { via: null, errors };
 }
 
+/**
+ * 发布日报：若 workflow 设置了 CTM_REPORT_FILE，先暂存为 JSON，
+ * 等「收故事」结束后由 send_report.js 把收录结果并进同一条消息再推送。
+ * 未设置该变量（本地 / 巡检 / 其它调用）时行为完全不变：立即推送。
+ * 暂存失败会自动回退为立即推送，绝不静默。
+ */
+async function publish(summary, log) {
+  const file = process.env.CTM_REPORT_FILE;
+  if (file) {
+    try {
+      fs.writeFileSync(file, JSON.stringify(summary), 'utf8');
+      log('[NOTIFY] 日报已暂存，等待与收录结果合并推送');
+      return;
+    } catch (e) { log('[NOTIFY] 日报暂存失败，回退为立即推送：' + safeErr(e)); }
+  }
+  try {
+    const r = await notify(summary);
+    if (r.via) log(`[NOTIFY] 日报已推送（${r.via}）`);
+    else log('[NOTIFY] 无可用推送通道：' + (r.errors || []).map(safeErr).join('; '));
+  } catch (e) { log('[NOTIFY] 推送失败: ' + safeErr(e)); }
+}
+
 const AUTH_PATH = process.env.CTM_AUTH_STATE || path.join(__dirname, 'auth_state.json');
 const OUT_DIR = path.join(__dirname, 'daily');
 const PROCESSED_FILE = path.join(OUT_DIR, 'processed_records.json');
@@ -415,13 +437,7 @@ async function runIncremental(opts = {}) {
     stale_hours: Math.round(staleMs / 3600000), md, lines: stats.lines,
     token_remaining_days: safeTokenDays(),
   };
-  if (opts.notify !== false) {
-    try {
-      const r = await notify(summary);
-      if (r.via) log(`[NOTIFY] 日报已推送（${r.via}）`);
-      else log('[NOTIFY] 无可用推送通道：' + (r.errors || []).map(safeErr).join('; '));
-    } catch (e) { log('[NOTIFY] 推送失败: ' + safeErr(e)); }
-  }
+  if (opts.notify !== false) await publish(summary, log);
   return summary;
 }
 
@@ -449,13 +465,7 @@ async function runDaily(targetDate, opts = {}) {
   log(`[DAILY] 报告：${path.join(OUT_DIR, `records_${target}.md`)}`);
 
   const summary = { source: opts.source || 'daily', date: target, meetings: dayMeetings.length, ok: stats.ok, fail: stats.fail, skipped: stats.skipped, noRecord: stats.noRecord, md, lines: stats.lines, token_remaining_days: safeTokenDays() };
-  if (opts.notify !== false) {
-    try {
-      const r = await notify(summary);
-      if (r.via) log(`[NOTIFY] 日报已推送（${r.via}）`);
-      else log('[NOTIFY] 无可用推送通道：' + (r.errors || []).map(safeErr).join('; '));
-    } catch (e) { log('[NOTIFY] 推送失败: ' + safeErr(e)); }
-  }
+  if (opts.notify !== false) await publish(summary, log);
   // 按天补跑：若该日结束时间晚于当前进度，推进进度（避免增量重复拉）
   const prog = loadProgress();
   if (!prog || Math.floor(dayEnd / 1000) > prog.processed_until) saveProgress(Math.floor(dayEnd / 1000));

@@ -50,6 +50,8 @@ jobs:
           echo "auth_state.json 字节数: $(wc -c < "$AUTH_PATH")"
 
       - name: 运行管线（续期登录态 -> 拉会 -> 转写 -> IMA -> 企业微信）
+        env:
+          CTM_REPORT_FILE: ${{ runner.temp }}/ctm_report.json
         run: |
           MODE="${{ github.event.inputs.mode || 'inc' }}"
           DATE="${{ github.event.inputs.date }}"
@@ -71,7 +73,16 @@ jobs:
           STORY_NOTE_ID: ${{ secrets.STORY_NOTE_ID }}
           STORY_KB_ID: ${{ secrets.STORY_KB_ID }}
           STORY_BATCH_FILE: ${{ runner.temp }}/story_batch.jsonl
+          STORY_RESULT_FILE: ${{ runner.temp }}/story_result.json
         run: node story_collect.js
+
+      - name: 统一推送日报（转写 + 收录结果合并为一条）
+        if: always()
+        continue-on-error: true
+        env:
+          CTM_REPORT_FILE: ${{ runner.temp }}/ctm_report.json
+          STORY_RESULT_FILE: ${{ runner.temp }}/story_result.json
+        run: node send_report.js
 
       - name: 提交状态文件（仅去重记录/进度，非敏感）
         if: always()
@@ -98,4 +109,4 @@ jobs:
 
       - name: 清理临时凭证
         if: always()
-        run: rm -f "$RUNNER_TEMP/auth_state.json" "$RUNNER_TEMP/story_batch.jsonl"
+        run: rm -f "$RUNNER_TEMP/auth_state.json" "$RUNNER_TEMP/story_batch.jsonl" "$RUNNER_TEMP/ctm_report.json" "$RUNNER_TEMP/story_result.json"

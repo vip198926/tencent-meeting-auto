@@ -11,6 +11,9 @@ daily/run_log.jsonl
 # 收故事：逐字稿交接文件（含正文）/ 台账临时文件，绝不进公开仓库
 story_batch.jsonl
 story_state.json.tmp
+# 合并日报的临时交接文件（含会议标题），仅存在于 $RUNNER_TEMP
+ctm_report.json
+story_result.json
 
 # 一次性本地调试脚本 / 私人笔记（不进仓库）
 compare_two.js

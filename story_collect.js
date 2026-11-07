@@ -26,6 +26,7 @@ const { safeErr } = require('./log_safe');
 
 const STATE_FILE = process.env.STORY_STATE_FILE || path.join(__dirname, 'daily', 'story_state.json');
 const BATCH_FILE = process.env.STORY_BATCH_FILE || '';
+const RESULT_FILE = process.env.STORY_RESULT_FILE || '';
 const KB_ID = process.env.IMA_KB_ID || process.env.STORY_KB_ID || 'ima_kb_3nebCJv6';
 const TAG_DONE = '故事已收';
 const TAG_NONE = '无故事';
@@ -136,8 +137,19 @@ function deterministicToken(fp, docId, batchIdx) {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 
+// ---- 收录结果交接（供统一日报合并推送）----
+/** 只写固定文案 + 数字，绝不写人名 / 会议主题 / 原话；文件在 $RUNNER_TEMP，不进仓库与日志。 */
+function setResult(line, stats) {
+  if (!RESULT_FILE) return;
+  try {
+    fs.writeFileSync(RESULT_FILE, JSON.stringify({ line, stats: stats || {}, ts: new Date().toISOString() }), 'utf8');
+  } catch { /* 忽略：不影响收故事结果 */ }
+}
+
 // ---- 企微简报（只报数字，不含人名/原话/会议主题）----
 async function notify(text) {
+  // 合并日报模式：由 send_report.js 统一发一条，此处不再单独推送，避免重复消息
+  if (RESULT_FILE) return;
   if (!process.env.WECOM_WEBHOOK) return;
   try {
     const { sendText } = require('./wecom_webhook');
@@ -161,6 +173,7 @@ async function main() {
   const lack = missing();
   if (lack.length) {
     log('未配置完整凭证（缺 ' + lack.length + ' 项），跳过收故事；主管线不受影响');
+    setResult(`📖 收故事：未配置完整凭证（缺 ${lack.length} 项），已跳过`);
     return 0;
   }
 
@@ -171,7 +184,8 @@ async function main() {
   const items = [...batch, ...recovered];
 
   if (!items.length) {
-    log('本轮无新增逐字稿，静默结束');
+    log('本轮无新增逐字稿，收录结果已记入日报');
+    setResult('📖 收故事：本轮无新增逐字稿（0 份待处理）');
     return 0;
   }
 
@@ -179,7 +193,10 @@ async function main() {
   const todo = kept.filter(it => !state.seen[llm.fingerprint(it.text)]);
   log('待处理', todo.length, '份 | 同分钟判掉', dropped, '份 | 指纹已收', kept.length - todo.length, '份 | 重试恢复', recovered.length, '份');
 
-  if (!todo.length) return 0;
+  if (!todo.length) {
+    setResult(`📖 收故事：${kept.length} 份均为已收或同分钟重复，无新增`);
+    return 0;
+  }
 
   // ⓿ 自检：飞书 token + 两份文档可读。任一失败 → 不打标签，下轮重试。
   let token;
@@ -193,6 +210,7 @@ async function main() {
     }
   } catch (e) {
     log('自检失败：' + safeErr(e) + '；本轮不打标签，下轮自动重试');
+    setResult(`📖 收故事：自检失败，本轮 ${todo.length} 份未处理，未打标签，下轮自动重试`);
     await notify(`收故事 · ${date}\n自检失败，本轮 ${todo.length} 份未处理，未打标签，下轮自动重试。`);
     return 0;
   }
@@ -267,6 +285,9 @@ async function main() {
 
   const products = Object.entries(productCount).map(([k, n]) => `${k} ${n}`).join('、') || '无';
   log(`完成：处理 ${stats.processed} | 无故事 ${stats.none} | 效果 ${stats.effects} | 人物 ${stats.people} | 存疑丢弃 ${stats.rejectedQuote + stats.rejectedOther} | 失败 ${stats.failed}`);
+  setResult(
+    `📖 收故事：处理 ${stats.processed} 份｜无故事 ${stats.none} 份｜新增效果故事 ${stats.effects} 条（${products}）、人物篇 ${stats.people} 篇｜失败 ${stats.failed} 份`,
+    stats);
 
   if (stats.processed || stats.failed) {
     await notify([
@@ -282,5 +303,9 @@ async function main() {
 
 (async () => {
   try { process.exit(await main()); }
-  catch (e) { log('顶层异常：' + safeErr(e)); process.exit(0); } // 绝不拖红主管线
+  catch (e) {
+    log('顶层异常：' + safeErr(e));
+    setResult('📖 收故事：执行异常，已跳过（不影响转写管线）');
+    process.exit(0); // 绝不拖红主管线
+  }
 })();
