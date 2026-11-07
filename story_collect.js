@@ -1,7 +1,7 @@
 /**
  * story_collect.js — 收故事（GitHub Actions 版）
  *
- * 接在 09:36 会议转写管线之后运行，把本轮上传的逐字稿自动提取成故事，
+ * 接在每日管线 / 巡检之后运行，把本轮上传的逐字稿自动提取成故事，
  * 增量追加到两份飞书文档，再打 IMA 标签记账。凭证未配齐时静默跳过，不影响主管线。
  *
  * 隐私约定（public 仓库 + 公开的 Actions 日志）：
@@ -10,7 +10,7 @@
  *   - 所有日志只打数量与错误码，企微简报不含人名与原话。
  *
  * 用法：
- *   node story_collect.js                       正常跑（由 daily.yml 调用）
+ *   node story_collect.js                       正常跑（由 daily.yml / patrol.yml 调用）
  *   node story_collect.js --selftest <file.md>  离线自检预筛，不联网、不写任何外部系统
  */
 'use strict';

@@ -1,8 +1,8 @@
 /**
  * send_report.js — 统一推送日报（转写明细 + 收录结果合并为同一条企微消息）
  *
- * 由 daily.yml 在「收故事」之后以 if: always() 调用：
- *   主管线把 summary 暂存到 $RUNNER_TEMP/ctm_report.json（不立即推送），
+ * 由 daily.yml / patrol.yml 在「收故事」之后以 if: always() 调用：
+ *   两条管线各自把 summary 暂存到 $RUNNER_TEMP/ctm_report.json（不立即推送），
  *   收故事把结果写到 $RUNNER_TEMP/story_result.json，
  *   本脚本合并两者后发一条消息，保证「转写」和「收录」一起到达、绝不静默。
  *

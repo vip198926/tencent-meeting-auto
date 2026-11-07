@@ -14,7 +14,7 @@ permissions:
 jobs:
   pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       IMA_CLIENT_ID: ${{ secrets.IMA_CLIENT_ID }}
       IMA_API_KEY: ${{ secrets.IMA_API_KEY }}
@@ -40,8 +40,38 @@ jobs:
           echo "CTM_AUTH_STATE=$AUTH_PATH" >> "$GITHUB_ENV"
           echo "auth_state.json 字节数: $(wc -c < "$AUTH_PATH")"
 
-      - name: 运行巡检（增量 + 始终推送通知）
-        run: node run.js inc
+      - name: 运行巡检（增量，日报暂存待合并）
+        env:
+          CTM_REPORT_FILE: ${{ runner.temp }}/ctm_report.json
+        run: |
+          # 逐字稿交接文件只在 $RUNNER_TEMP，runner 结束即销毁，绝不进仓库
+          export STORY_BATCH_FILE="$RUNNER_TEMP/story_batch.jsonl"
+          node run.js inc
+
+      - name: 收故事（LLM 抽取 -> 飞书增量追加 -> IMA 标签）
+        if: always()
+        continue-on-error: true
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_DOC_PEOPLE: ${{ secrets.FEISHU_DOC_PEOPLE }}
+          FEISHU_DOC_EFFECT: ${{ secrets.FEISHU_DOC_EFFECT }}
+          STORY_NOTE_ID: ${{ secrets.STORY_NOTE_ID }}
+          STORY_KB_ID: ${{ secrets.STORY_KB_ID }}
+          STORY_BATCH_FILE: ${{ runner.temp }}/story_batch.jsonl
+          STORY_RESULT_FILE: ${{ runner.temp }}/story_result.json
+        run: node story_collect.js
+
+      - name: 统一推送日报（转写 + 收录结果合并为一条）
+        if: always()
+        continue-on-error: true
+        env:
+          CTM_REPORT_FILE: ${{ runner.temp }}/ctm_report.json
+          STORY_RESULT_FILE: ${{ runner.temp }}/story_result.json
+        run: node send_report.js
 
       - name: 提交状态文件（仅去重记录/进度，非敏感）
         if: always()
@@ -68,4 +98,4 @@ jobs:
 
       - name: 清理临时凭证
         if: always()
-        run: rm -f "$RUNNER_TEMP/auth_state.json"
+        run: rm -f "$RUNNER_TEMP/auth_state.json" "$RUNNER_TEMP/story_batch.jsonl" "$RUNNER_TEMP/ctm_report.json" "$RUNNER_TEMP/story_result.json"

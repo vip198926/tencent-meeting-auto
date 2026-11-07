@@ -64,7 +64,7 @@ async function notify(summary) {
 /**
  * 发布日报：若 workflow 设置了 CTM_REPORT_FILE，先暂存为 JSON，
  * 等「收故事」结束后由 send_report.js 把收录结果并进同一条消息再推送。
- * 未设置该变量（本地 / 巡检 / 其它调用）时行为完全不变：立即推送。
+ * 未设置该变量（本地 / 其它调用）时行为完全不变：立即推送。
  * 暂存失败会自动回退为立即推送，绝不静默。
  */
 async function publish(summary, log) {
