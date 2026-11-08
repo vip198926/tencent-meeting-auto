@@ -93,9 +93,12 @@ async function feishuToken() {
   return json.tenant_access_token;
 }
 
-const textBlock = content => ({ block_type: 2, text: { elements: [{ text_run: { content } }] } });
-const h2 = content => ({ block_type: 4, heading2: { elements: [{ text_run: { content } }] } });
-const h3 = content => ({ block_type: 5, heading3: { elements: [{ text_run: { content } }] } });
+// 飞书约定：空 content 的块（block_type 2/4/5）会报 1770001 invalid param。
+// 任何字段为空或仅空白时填单空格，杜绝空块。
+const clean = c => { const s = String(c); return s.trim() ? s : ' '; };
+const textBlock = content => ({ block_type: 2, text: { elements: [{ text_run: { content: clean(content) } }] } });
+const h2 = content => ({ block_type: 4, heading2: { elements: [{ text_run: { content: clean(content) } }] } });
+const h3 = content => ({ block_type: 5, heading3: { elements: [{ text_run: { content: clean(content) } }] } });
 
 /**
  * 追加块到文档末尾（index:-1）。绝不 overwrite。返回新 block_id 列表用于回滚定位。

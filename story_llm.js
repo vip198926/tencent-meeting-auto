@@ -192,17 +192,18 @@ function validate(parsed, body) {
 
   const people = [];
   for (const p of (Array.isArray(parsed.people) ? parsed.people : [])) {
-    if (!p.person || !Array.isArray(p.sections) || p.sections.length < 3 || p.sections.length > 6) continue;
+    if (!p.person) continue;
     const sections = [];
-    let bad = false;
-    for (const sec of p.sections) {
+    for (const sec of (Array.isArray(p.sections) ? p.sections : [])) {
+      const title = String(sec.title || '').trim();
+      if (!title) { rejected.fields++; continue; }          // 无标题小节丢弃，避免空 h3 块触发飞书 1770001
       const excerpts = (Array.isArray(sec.excerpts) ? sec.excerpts : [])
         .map(x => String(x))
         .filter(x => norm(x).length >= 6 && nBody.includes(norm(x)));
-      if (!excerpts.length) { bad = true; rejected.quote++; break; }
-      sections.push({ title: String(sec.title || '').slice(0, 20), excerpts: excerpts.slice(0, 6).map(x => x.slice(0, 300)) });
+      if (!excerpts.length) { rejected.quote++; continue; }  // 无摘录小节丢弃
+      sections.push({ title: title.slice(0, 20), excerpts: excerpts.slice(0, 6).map(x => x.slice(0, 300)) });
     }
-    if (bad || !sections.length) continue;
+    if (sections.length < 3 || sections.length > 6) continue;  // 人物线需 3-6 节
     people.push({ person: String(p.person).slice(0, 30), sections });
   }
 
