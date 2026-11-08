@@ -371,7 +371,7 @@ GITHUB_PAT=<你的PAT> node set_secrets.js     # 或只更新 CTM_AUTH_STATE_RAW
 | `LLM_API_KEY` | LLM API Key（OpenAI 兼容格式） |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` | 飞书自建应用凭据 |
 | `FEISHU_DOC_PEOPLE` / `FEISHU_DOC_EFFECT` | 两份飞书文档的 `document_id`（从文档 URL 里取） |
-| `STORY_NOTE_ID` | IMA 索引笔记的 `note_id` |
+| `STORY_NOTE_ID` | （已弃用）索引改存 `story_state.json` 台账；笔记追加因 ima 作者限制（210005）已移除 |
 | `STORY_KB_ID` | IMA 知识库 ID（可选，不设则用 `IMA_KB_ID` 或默认库） |
 
 ### LLM 配置（Repository Variables）
@@ -393,7 +393,7 @@ GITHUB_PAT=<你的PAT> node set_secrets.js     # 或只更新 CTM_AUTH_STATE_RAW
 
 - **原话硬校验**：LLM 返回的每条引文必须在逐字稿里逐字命中，否则整条丢弃、不写入飞书。这是对「不许编造」的机器可执行兜底。
 - **不 overwrite**：只用 `children` 追加块到文档末尾，绝不重写 38 万字原文；每次追加用确定性 `client_token` 保证重试幂等。
-- **失败不打标签**：任何一步失败都不打「故事已收」，下轮按 `record_id` 重抓正文自动重试。
+- **飞书失败才重试**：飞书写入失败才标失败、不打「故事已收」、下轮按 `record_id` 重抓重试；打标签失败仅记日志不阻断（ima 笔记索引已移除，索引只存 `story_state.json`）。
 - **台账** `daily/story_state.json` 只存内容指纹、`media_id`、`record_id`、`block_id` 与时间戳，不含人名、原话、会议主题。
 
 ### v1 的边界

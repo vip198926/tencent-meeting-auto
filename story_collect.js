@@ -259,10 +259,15 @@ async function main() {
         writes.push({ doc: 'effect', blocks: ids.length, fp });
       }
 
-      // 只有飞书写入成功后才追加索引、打标签
-      await lib.appendNote(process.env.STORY_NOTE_ID,
-        `- ${date}：自动收故事 1 份（指纹 ${fp}）→ 人物篇 ${v.people.length} 篇、效果故事 ${v.effects.length} 条（${[...new Set(v.effects.map(e => e.product))].join('、') || '无'}）`);
-      if (rec.media_id) await lib.addTag(rec.media_id, TAG_DONE, KB_ID);
+      // 飞书写入成功即视为主流程完成。IMA 笔记索引（appendNote）已移除：STORY_NOTE_ID
+      // 是用户在 ima 客户端建的笔记，API 身份非作者，写接口必报 210005 NOTE_NOT_OWNER
+      // （不可放开）；索引信息改存 story_state.json 的 writes 台账。
+      // 打「故事已收」标签：知识库 item 由 API 身份持有，可调；失败仅记日志不阻断主流程。
+      try {
+        if (rec.media_id) await lib.addTag(rec.media_id, TAG_DONE, KB_ID);
+      } catch (te) {
+        log('打标签失败（不影响飞书落库）：' + safeErr(te));
+      }
 
       v.effects.forEach(e => { productCount[e.product] = (productCount[e.product] || 0) + 1; });
       stats.effects += v.effects.length;
