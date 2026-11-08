@@ -1,14 +1,23 @@
 {
   "version": 1,
-  "updated": "2026-11-08T05:14:45.630Z",
-  "seen": {},
-  "pending": [
-    {
-      "record_id": "baafed45-8e6e-46cc-9bb7-c020b6e8eb61",
-      "media_id": "markdown_cls1_173ef1058496f6bbd069203c45f22ed0_2a171cc3feee42275318caa5c933d53a7361581910354792",
-      "fp": "874fe7818e46",
-      "ts": "2026-11-08T05:14:40.256Z"
+  "updated": "2026-11-08T19:36:49.131Z",
+  "seen": {
+    "ed505f75e4e2": {
+      "ts": "2026-11-08T19:36:33.454Z",
+      "stories": 3,
+      "media_id": "markdown_cls1_173ef1058496f6bbd069203c45f22ed0_2a171cc3feee42275318caa5c933d53a7361581910354792"
     }
-  ],
-  "writes": []
+  },
+  "pending": [],
+  "writes": [
+    {
+      "ts": "2026-11-08T19:36:33.454Z",
+      "fp": "ed505f75e4e2",
+      "docs": [
+        "people",
+        "effect"
+      ],
+      "blocks": 29
+    }
+  ]
 }
