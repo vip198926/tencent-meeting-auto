@@ -75,12 +75,15 @@ async function pushDailyReport(summary) {
       if (typeof stale_hours === 'number' && stale_hours > 26) alerts.push(`距上次处理已达 ${stale_hours}h，疑似漏跑/积压`);
       if (alerts.length) extra.push(`⚠️ 预警：${alerts.join('；')}`);
     }
-    // 明细取前 12 行，避免超长
+    // 明细取前 12 行，避免超长；故事板块挪进明细开头（仍避开头尾截断）
     const detail = (lines || []).filter(Boolean).slice(0, 12).map(l => l.replace(/^\|\s*/, '').replace(/\s*\|\s*$/, ''));
+    const storyLine = summary.story ? String(summary.story) : '';
+    const detailBlock = (detail.length || storyLine)
+      ? '\n\n—— 明细 ——' + (storyLine ? '\n' + storyLine : '') + (detail.length ? '\n' + detail.join('\n') : '')
+      : '';
     content = head
       + (extra.length ? '\n' + extra.join('\n') : '')
-      + (summary.story ? '\n' + String(summary.story) : '')
-      + (detail.length ? `\n\n—— 明细 ——\n${detail.join('\n')}` : '');
+      + detailBlock;
   }
   return sendText(content);
 }

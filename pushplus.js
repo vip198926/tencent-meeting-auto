@@ -80,10 +80,15 @@ async function pushDailyReport(summary) {
       if (alerts.length) extra.push(`- ⚠️ 预警：${alerts.join('；')}`);
     }
     const detail = (md || '').split('| 时间 | 标题 | 类型 | 结果 |')[1];
+    const storyLine = summary.story ? String(summary.story) : '';
+    const detailBlock = (detail || storyLine)
+      ? '\n\n### 明细'
+        + (storyLine ? `\n\n**${storyLine}**` : '')
+        + (detail ? `\n\n| 时间 | 标题 | 类型 | 结果 |${detail}` : '')
+      : '';
     content = head
       + (extra.length ? '\n\n' + extra.join('\n') : '')
-      + (summary.story ? `\n\n**${String(summary.story)}**` : '')
-      + (detail ? `\n\n### 明细\n\n| 时间 | 标题 | 类型 | 结果 |${detail}` : '');
+      + detailBlock;
   }
   return send(title, content, 'markdown');
 }
