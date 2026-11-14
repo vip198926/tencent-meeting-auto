@@ -80,6 +80,34 @@ t('brief 数字是原文数字的子串（300 vs 3000）→ 仍算没出现', ()
   assert.strictEqual(v.rejected.brief, 1);
 });
 
+t('数字对得上但量词不对（原文「3 级养护」→ brief「3 个月」）→ 弃用', () => {
+  const body = '[00:01:05] 成员丁：\n我现在用 3 级养护。';
+  const v = llm.validate({
+    effects: [{
+      person: '成员丁', product: '雪莲贴', problem: '腰酸', duration: '三个月',
+      result: '不酸了', quote: '我现在用 3 级养护。', brief: '成员丁｜用 3 个月就不酸了',
+    }], people: [],
+  }, body);
+  assert.strictEqual(v.effects[0].brief, '');
+  assert.strictEqual(v.rejected.brief, 1);
+});
+
+t('数字+量词整体出现（原文「40 分钟」→ brief「40 分钟」）→ 保留', () => {
+  const body = '[00:01:05] 成员戊：\n体验了 40 分钟。';
+  const v = llm.validate({
+    effects: [{
+      person: '成员戊', product: '干膜', problem: '脸差', duration: '一次',
+      result: '有改善', quote: '体验了 40 分钟。', brief: '成员戊｜体验 40 分钟就心动',
+    }], people: [],
+  }, body);
+  assert.strictEqual(v.effects[0].brief, '成员戊｜体验 40 分钟就心动');
+});
+
+t('带数字+量词的原文（1137 万）→ 保留', () => {
+  const v = llm.validate({ effects: [], people: [person({ brief: '成员甲｜一年半做到 1137 万' })] }, BODY);
+  assert.strictEqual(v.people[0].brief, '成员甲｜一年半做到 1137 万');
+});
+
 t('brief 带引号 → 清掉外层引号', () => {
   const v = llm.validate({ effects: [effect({ brief: '「成员乙｜三个月睡好了」' })], people: [] }, BODY);
   assert.strictEqual(v.effects[0].brief, '成员乙｜三个月睡好了');

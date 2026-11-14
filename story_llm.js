@@ -290,15 +290,28 @@ function validate(parsed, body, opts) {
    * brief 只进内部群消息，但仍是 LLM 自由生成 → 必须能对着原文核。
    * 数字白名单：brief 里每个数字都必须在逐字稿里以同样的写法出现，
    * 「一年半」被写成「18 个月」这类换算就是编造，整句丢弃（下一步用模板兜底）。
+   * 带量词时要求「数字+量词」整体出现：原文只有「3 级养护」，
+   * brief 写「3 个月」不该过——单看数字 3 会误放行。
    */
+  const bodyN = String(body).replace(/\s+/g, '');
+  const UNITS = '个天月年周次条盒贴人万元岁斤';
   const hasNum = n => new RegExp('(^|\\D)' + n.replace(/\./g, '\\.') + '(\\D|$)').test(body);
+  const unitOk = raw => {
+    const m = raw.match(new RegExp('(\\d+(?:\\.\\d+)?)\\s*([' + UNITS + '])'));
+    return m ? bodyN.includes(m[1] + m[2]) : true;
+  };
   const briefOk = raw => {
     let b = String(raw || '').replace(/[\r\n\t]+/g, ' ').trim();
     if (!b) return '';
     b = b.replace(/^[「『"'《【(]+/, '').replace(/[」』"'》】)]+$/, '').trim();
     if (!b) return '';
-    const nums = b.match(/\d+(?:\.\d+)?/g) || [];
-    if (nums.some(n => !hasNum(n))) return '';
+    const tokens = b.match(new RegExp('\\d+(?:\\.\\d+)?\\s*[' + UNITS + ']?', 'g')) || [];
+    for (const tk of tokens) {
+      const n = (tk.match(/\d+(?:\.\d+)?/) || [''])[0];
+      if (!n) continue;
+      if (!hasNum(n)) return '';
+      if (!unitOk(tk)) return '';
+    }
     return b.slice(0, 40);
   };
 
