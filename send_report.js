@@ -31,7 +31,10 @@ function readJson(p) {
   summary.story = res && res.line
     ? res.line
     : '📖 收故事：本轮未产生结果（步骤未执行或异常，请查看 Actions 日志）';
-  console.log('[REPORT] 已合并转写与收录结果，准备推送');
+  // 故事概述（含人名）：只在本进程内存里转手，绝不打印。企微群是内部群，允许出现；
+  // 公开的 Actions 日志不允许，所以这里一行都不 log。
+  summary.storyDetails = (res && Array.isArray(res.details)) ? res.details.filter(x => typeof x === 'string' && x) : [];
+  summary.storyDetailsMore = (res && Number(res.detailsMore)) || 0;  console.log('[REPORT] 已合并转写与收录结果，准备推送');
 
   const channels = [['wecom', pushWecom], ['pushplus', pushPushplus]];
   for (const [name, fn] of channels) {

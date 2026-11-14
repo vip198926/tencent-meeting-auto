@@ -124,14 +124,19 @@ const SYSTEM_PROMPT = `你是「收故事」抽取器。从会议逐字稿里找
    不收：产品机理、成分、制度、价格、没有具名的「有个客户」。
 5. 人物故事线：有完整人生线（从哪来 → 原来做什么 → 遇到什么坎 → 现在怎样）才输出；分 3-6 小节，每节给标题 + 原文摘录若干条。标题要具体，不超过 20 字。
 6. 禁止扩写：problem / duration / result 只能摘原文里明确出现的词句。不许补场景、神态、心理、比喻、总结，不许补原文没有的数字、时间、地点、动作。
+7. brief 是给内部群看的一句话概述，格式固定为「人物｜他发生了什么」，长度 12-32 字，不许用引号、书名号、括号。
+   - 只允许用原文出现过的词重新组合，禁止新增任何人物、数字、地点、产品、时间。
+   - 有具体数字要带上数字，但必须与原文完全一致（原文说「一年半」，就不要写成「18 个月」）。
+   - 不许抒情、不许评价、不许写「感人」「励志」「逆袭」这类词。
+   - 效果故事写成「原问题 → 现在怎样」；人物线写成「原来的身份 → 现在的状态」。
 
 严格返回 JSON（不要 markdown 代码块、不要解释）：
 {
   "effects": [
-    {"person":"原话所在块的发言人标签","product":"8类之一","problem":"原问题(<=30字)","duration":"用了多久(<=20字)","result":"具体变化(<=40字)","quote":"逐字稿里的一句原话","speaker":"这句话是谁说的","subject":"讲别人的事才填，讲自己留空"}
+    {"person":"原话所在块的发言人标签","product":"8类之一","problem":"原问题(<=30字)","duration":"用了多久(<=20字)","result":"具体变化(<=40字)","quote":"逐字稿里的一句原话","speaker":"这句话是谁说的","subject":"讲别人的事才填，讲自己留空","brief":"人物｜一句话概述(12-32字)"}
   ],
   "people": [
-    {"person":"发言人标签","subject":"讲别人的事才填，讲自己留空","sections":[{"title":"小节标题","excerpts":["逐字稿原句","逐字稿原句"]}]}
+    {"person":"发言人标签","subject":"讲别人的事才填，讲自己留空","brief":"人物｜一句话概述(12-32字)","sections":[{"title":"小节标题","excerpts":["逐字稿原句","逐字稿原句"]}]}
   ]
 }`;
 
@@ -273,13 +278,29 @@ function validate(parsed, body, opts) {
   const canon = nm ? (x => nm.person(x)) : (x => String(x || ''));
   const cmp = nm ? ((a, b) => nm.same(a, b)) : samePerson;
   const blocks = parseSpeakerBlocks(body);
-  const rejected = { quote: 0, product: 0, fields: 0, duplicate: 0, conflict: 0 };
+  const rejected = { quote: 0, product: 0, fields: 0, duplicate: 0, conflict: 0, brief: 0 };
   const unclaimed = [];
   const unclaimedSeen = new Set();
   const effects = [];
   const people = [];
   const seenEffect = new Set();
   let renamed = 0;   // 被对照表纠正成标准名的条数（只记数字）
+
+  /**
+   * brief 只进内部群消息，但仍是 LLM 自由生成 → 必须能对着原文核。
+   * 数字白名单：brief 里每个数字都必须在逐字稿里以同样的写法出现，
+   * 「一年半」被写成「18 个月」这类换算就是编造，整句丢弃（下一步用模板兜底）。
+   */
+  const hasNum = n => new RegExp('(^|\\D)' + n.replace(/\./g, '\\.') + '(\\D|$)').test(body);
+  const briefOk = raw => {
+    let b = String(raw || '').replace(/[\r\n\t]+/g, ' ').trim();
+    if (!b) return '';
+    b = b.replace(/^[「『"'《【(]+/, '').replace(/[」』"'》】)]+$/, '').trim();
+    if (!b) return '';
+    const nums = b.match(/\d+(?:\.\d+)?/g) || [];
+    if (nums.some(n => !hasNum(n))) return '';
+    return b.slice(0, 40);
+  };
 
   // 待认领条目只保留逐字命中原文的内容：LLM 生成的 problem/result 等自由字段
   // 一律不写入，避免把编造的场景/数字带进飞书。reason=3 时不写 person。
@@ -320,6 +341,8 @@ function validate(parsed, body, opts) {
     const dedupKey = norm(stdName) + '|' + product + '|' + q.slice(0, 40);
     if (seenEffect.has(dedupKey)) { rejected.duplicate++; continue; }
     seenEffect.add(dedupKey);
+    const brief = briefOk(e.brief);
+    if (e.brief && !brief) rejected.brief++;
     effects.push({
       person: String(stdName).slice(0, 30),
       product,
@@ -329,6 +352,7 @@ function validate(parsed, body, opts) {
       quote: String(e.quote).slice(0, 300),
       speaker: a.speaker || '',
       stamp: a.stamp || '',
+      brief,
     });
   }
 
@@ -361,14 +385,31 @@ function validate(parsed, body, opts) {
     }
     const stdName = canon(p.person);
     if (nm && stdName !== String(p.person || '').trim()) renamed++;
-    people.push({ person: String(stdName).slice(0, 30), sections });
+    const brief = briefOk(p.brief);
+    if (p.brief && !brief) rejected.brief++;
+    people.push({ person: String(stdName).slice(0, 30), brief, sections });
   }
 
   return { effects, people, rejected, unclaimed, renamed };
 }
 
+/**
+ * 企业微信明细里的一行概述：优先用模型给的 brief（已过数字白名单校验），
+ * 校验没过就用模板拼——模板只用已过校验的字段，绝不引入新信息。
+ * 输出上限 40 字，避免一条概述把企微 2048 字节额度吃掉。
+ */
+function briefOf(kind, item) {
+  if (!item) return '';
+  if (item.brief) return String(item.brief).slice(0, 40);
+  if (kind === 'effect') {
+    return `${item.person}｜${item.problem} → ${item.result}`.slice(0, 40);
+  }
+  const first = (item.sections && item.sections[0] && item.sections[0].title) || '';
+  return `${item.person}｜${first}`.slice(0, 40);
+}
+
 module.exports = {
   PRODUCTS, REASON, transcriptBody, fingerprint, transcriptMinute,
   preselect, extractStories, validate, parseJsonLoose, setProductAliases,
-  parseSpeakerBlocks, locateQuote, attribute,
+  parseSpeakerBlocks, locateQuote, attribute, briefOf,
 };

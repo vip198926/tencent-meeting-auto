@@ -81,9 +81,15 @@ async function pushDailyReport(summary) {
     }
     const detail = (md || '').split('| 时间 | 标题 | 类型 | 结果 |')[1];
     const storyLine = summary.story ? String(summary.story) : '';
+    const briefs = Array.isArray(summary.storyDetails) ? summary.storyDetails.filter(Boolean) : [];
+    const more = Number(summary.storyDetailsMore) || 0;
+    const briefBlock = briefs.length
+      ? '\n\n' + briefs.map(b => '- ' + b).join('\n') + (more > 0 ? `\n- …另 ${more} 条已写入飞书` : '')
+      : '';
     const detailBlock = (detail || storyLine)
       ? '\n\n### 明细'
         + (storyLine ? `\n\n**${storyLine}**` : '')
+        + briefBlock
         + (detail ? `\n\n| 时间 | 标题 | 类型 | 结果 |${detail}` : '')
       : '';
     content = head

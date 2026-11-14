@@ -57,35 +57,43 @@ async function sendText(content) {
  *  source === 'patrol' 时渲染为「巡检简报」，并附登录态剩余天数 + 积压/超时预警；
  *  其余情况渲染为「日报」。两者标题与字段明显区分。
  */
-async function pushDailyReport(summary) {
+function renderDailyReport(summary) {
   const { date, meetings, ok, fail, skipped, noRecord, error, lines, source, token_remaining_days, stale_hours } = summary;
   const isPatrol = source === 'patrol';
-  let content;
   if (error) {
-    content = `⚠️ 会议转写 ${date} 执行失败\n错误：${error}\n请检查登录态：本机运行 sync_auth.bat 刷新同步。`;
-  } else {
-    const head = (isPatrol ? `🔍 会议转写巡检简报 ${date}` : `📋 会议转写日报 ${date}`)
-      + `\n共 ${meetings} 场会\n✅ 成功上传：${ok} 条\n❌ 失败：${fail} 条\n⏭️ 已上传跳过：${skipped} 条\n⬜ 无录制/转写：${noRecord} 场`;
-    const extra = [];
-    if (typeof token_remaining_days === 'number') extra.push(`🔑 登录态剩余约 ${token_remaining_days} 天`);
-    if (isPatrol) {
-      if (typeof stale_hours === 'number') extra.push(`⏱️ 距上次处理 ${stale_hours} 小时`);
-      const alerts = [];
-      if (typeof token_remaining_days === 'number' && token_remaining_days < 2) alerts.push('登录态即将失效(<2天)，请尽快 sync_auth.bat 续期');
-      if (typeof stale_hours === 'number' && stale_hours > 26) alerts.push(`距上次处理已达 ${stale_hours}h，疑似漏跑/积压`);
-      if (alerts.length) extra.push(`⚠️ 预警：${alerts.join('；')}`);
-    }
-    // 明细取前 12 行，避免超长；故事板块挪进明细开头（仍避开头尾截断）
-    const detail = (lines || []).filter(Boolean).slice(0, 12).map(l => l.replace(/^\|\s*/, '').replace(/\s*\|\s*$/, ''));
-    const storyLine = summary.story ? String(summary.story) : '';
-    const detailBlock = (detail.length || storyLine)
-      ? '\n\n—— 明细 ——' + (storyLine ? '\n' + storyLine : '') + (detail.length ? '\n' + detail.join('\n') : '')
-      : '';
-    content = head
-      + (extra.length ? '\n' + extra.join('\n') : '')
-      + detailBlock;
+    return `⚠️ 会议转写 ${date} 执行失败\n错误：${error}\n请检查登录态：本机运行 sync_auth.bat 刷新同步。`;
   }
-  return sendText(content);
+  const head = (isPatrol ? `🔍 会议转写巡检简报 ${date}` : `📋 会议转写日报 ${date}`)
+    + `\n共 ${meetings} 场会\n✅ 成功上传：${ok} 条\n❌ 失败：${fail} 条\n⏭️ 已上传跳过：${skipped} 条\n⬜ 无录制/转写：${noRecord} 场`;
+  const extra = [];
+  if (typeof token_remaining_days === 'number') extra.push(`🔑 登录态剩余约 ${token_remaining_days} 天`);
+  if (isPatrol) {
+    if (typeof stale_hours === 'number') extra.push(`⏱️ 距上次处理 ${stale_hours} 小时`);
+    const alerts = [];
+    if (typeof token_remaining_days === 'number' && token_remaining_days < 2) alerts.push('登录态即将失效(<2天)，请尽快 sync_auth.bat 续期');
+    if (typeof stale_hours === 'number' && stale_hours > 26) alerts.push(`距上次处理已达 ${stale_hours}h，疑似漏跑/积压`);
+    if (alerts.length) extra.push(`⚠️ 预警：${alerts.join('；')}`);
+  }
+  // 明细取前 12 行，避免超长；故事板块挪进明细开头（仍避开头尾截断）
+  // 有故事概述时，会议明细让位压到 6 行：概述是人要读的重点，截断尾部也比截断概述好。
+  const briefs = Array.isArray(summary.storyDetails) ? summary.storyDetails.filter(Boolean) : [];
+  const more = Number(summary.storyDetailsMore) || 0;
+  const briefLines = briefs.map(b => '· ' + b);
+  if (more > 0) briefLines.push(`· …另 ${more} 条已写入飞书`);
+  const detail = (lines || []).filter(Boolean).slice(0, briefLines.length ? 6 : 12)
+    .map(l => l.replace(/^\|\s*/, '').replace(/\s*\|\s*$/, ''));
+  const storyLine = summary.story ? String(summary.story) : '';
+  const storyPart = storyLine + (briefLines.length ? '\n' + briefLines.join('\n') : '');
+  const detailBlock = (detail.length || storyLine)
+    ? '\n\n—— 明细 ——' + (storyLine ? '\n' + storyPart : '') + (detail.length ? '\n' + detail.join('\n') : '')
+    : '';
+  return head
+    + (extra.length ? '\n' + extra.join('\n') : '')
+    + detailBlock;
 }
 
-module.exports = { sendText, pushDailyReport, getWebhook };
+async function pushDailyReport(summary) {
+  return sendText(renderDailyReport(summary));
+}
+
+module.exports = { sendText, pushDailyReport, renderDailyReport, getWebhook };

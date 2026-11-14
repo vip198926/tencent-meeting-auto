@@ -149,11 +149,23 @@ function deterministicToken(fp, docId, batchIdx) {
 }
 
 // ---- 收录结果交接（供统一日报合并推送）----
-/** 只写固定文案 + 数字，绝不写人名 / 会议主题 / 原话；文件在 $RUNNER_TEMP，不进仓库与日志。 */
-function setResult(line, stats) {
+/**
+ * 只写固定文案 + 数字到日志；明细（含人名/概述）只进 $RUNNER_TEMP 交接文件，
+ * 由 send_report.js 直推内部群，绝不进仓库、artifact 与 Actions 日志。
+ */
+function setResult(line, stats, details) {
   if (!RESULT_FILE) return;
+  const list = (Array.isArray(details) ? details : []).filter(x => typeof x === 'string' && x);
+  const MAX = 6;                       // 企微 text 上限 2048 字节，概述按条占位（6 条约 750 字节）
+  const shown = list.slice(0, MAX);
   try {
-    fs.writeFileSync(RESULT_FILE, JSON.stringify({ line, stats: stats || {}, ts: new Date().toISOString() }), 'utf8');
+    fs.writeFileSync(RESULT_FILE, JSON.stringify({
+      line,
+      stats: stats || {},
+      details: shown,
+      detailsMore: Math.max(0, list.length - shown.length),
+      ts: new Date().toISOString(),
+    }), 'utf8');
   } catch { /* 忽略：不影响收故事结果 */ }
 }
 
@@ -243,9 +255,10 @@ async function main() {
     norm = null;
   }
 
-  const stats = { processed: 0, none: 0, effects: 0, people: 0, rejectedQuote: 0, rejectedOther: 0, newChapters: 0, renamed: 0, failed: 0 };
+  const stats = { processed: 0, none: 0, effects: 0, people: 0, rejectedQuote: 0, rejectedOther: 0, newChapters: 0, renamed: 0, briefDrop: 0, failed: 0 };
   const productCount = {};
   const failedNow = [];
+  const details = [];        // 只进内部群消息，不落仓库、不进日志
 
   /** 每份稿处理前重读布局：上一份稿的插入会让 index 漂移，且刚新建的章节要能被下一份命中。 */
   async function readLayouts() {
@@ -278,6 +291,7 @@ async function main() {
       stats.rejectedQuote += v.rejected.quote;
       stats.rejectedOther += v.rejected.product + v.rejected.fields + v.rejected.duplicate;
       stats.renamed += v.renamed || 0;
+      stats.briefDrop += v.rejected.brief || 0;
 
       const total = v.effects.length + v.people.length + v.unclaimed.length;
       if (!total) {                       // 一条可写内容都没有：不碰两份文档
@@ -316,7 +330,12 @@ async function main() {
         log('打标签失败（不影响飞书落库）：' + safeErr(te));
       }
 
-      v.effects.forEach(e => { productCount[e.product] = (productCount[e.product] || 0) + 1; });
+      // 内部群明细：人物在前、效果在后，一行一条，供人直接扫读
+      v.people.forEach(p => details.push(llm.briefOf('people', p)));
+      v.effects.forEach(e => {
+        details.push(llm.briefOf('effect', e));
+        productCount[e.product] = (productCount[e.product] || 0) + 1;
+      });
       stats.effects += v.effects.length;
       stats.people += v.people.length;
       state.seen[fp] = { ts: rec.ts, stories: total, media_id: rec.media_id };
@@ -337,10 +356,10 @@ async function main() {
   catch (e) { log('台账写入被拒：' + safeErr(e) + '（本轮内容已由幂等键保护）'); }
 
   const products = Object.entries(productCount).map(([k, n]) => `${k} ${n}`).join('、') || '无';
-  log(`完成：处理 ${stats.processed} | 无故事 ${stats.none} | 效果 ${stats.effects} | 人物 ${stats.people} | 新建章节 ${stats.newChapters} | 错名纠正 ${stats.renamed} | 原话未命中丢弃 ${stats.rejectedQuote + stats.rejectedOther} | 失败 ${stats.failed}`);
+  log(`完成：处理 ${stats.processed} | 无故事 ${stats.none} | 效果 ${stats.effects} | 人物 ${stats.people} | 新建章节 ${stats.newChapters} | 错名纠正 ${stats.renamed} | 概述弃用 ${stats.briefDrop} | 原话未命中丢弃 ${stats.rejectedQuote + stats.rejectedOther} | 失败 ${stats.failed}`);
   setResult(
     `📖 收故事：处理 ${stats.processed} 份｜无故事 ${stats.none} 份｜新增效果故事 ${stats.effects} 条（${products}）、人物篇 ${stats.people} 篇｜新建章节 ${stats.newChapters} 个｜失败 ${stats.failed} 份`,
-    stats);
+    stats, details);
 
   if (stats.processed || stats.failed) {
     await notify([
@@ -349,6 +368,7 @@ async function main() {
       `新增效果故事 ${stats.effects} 条（${products}）｜人物篇 ${stats.people} 篇`,
       `原话校验丢弃 ${stats.rejectedQuote} 条｜其他不合规 ${stats.rejectedOther} 条`,
       stats.failed ? '失败项未打标签，下轮自动重试。' : '',
+      details.length ? '\n—— 明细 ——\n' + details.slice(0, 6).join('\n') : '',
     ].filter(Boolean).join('\n'));
   }
   return 0;
