@@ -146,5 +146,48 @@ t('briefOf 上限 40 字', () => {
   assert.ok(s.length <= 40, '实际 ' + s.length);
 });
 
+t('shortName 去掉团队前缀，只留最后一段', () => {
+  assert.strictEqual(llm.shortName('某某团队-成员乙'), '成员乙');
+  assert.strictEqual(llm.shortName('某某团队－成员乙'), '成员乙');
+  assert.strictEqual(llm.shortName('甲店—成员丙'), '成员丙');
+  assert.strictEqual(llm.shortName('某某团队 - 成员乙'), '成员乙');
+});
+
+t('shortName 去掉开头序号', () => {
+  assert.strictEqual(llm.shortName('04 成员甲'), '成员甲');
+});
+
+t('shortName 无前缀时原样返回', () => {
+  assert.strictEqual(llm.shortName('成员甲'), '成员甲');
+  assert.strictEqual(llm.shortName('  成员甲  '), '成员甲');
+});
+
+t('shortName 截完不足 2 字退回原值，不返回空名', () => {
+  assert.strictEqual(llm.shortName('某某团队-乙'), '某某团队-乙');
+  assert.strictEqual(llm.shortName(''), '');
+});
+
+t('briefOf 兜底模板用简称渲染', () => {
+  const s = llm.briefOf('effect', { person: '某某团队-成员乙', problem: '睡不着', result: '睡好了', brief: '' });
+  assert.strictEqual(s, '成员乙｜睡不着 → 睡好了');
+  const p = llm.briefOf('people', { person: '甲店—成员丙', brief: '', sections: [{ title: '十年销售', excerpts: [] }] });
+  assert.strictEqual(p, '成员丙｜十年销售');
+});
+
+t('briefOf 用模型 brief 时不改写（brief 里已是简称）', () => {
+  const s = llm.briefOf('effect', { person: '某某团队-成员乙', problem: 'x', result: 'y', brief: '成员乙｜一年做到 1137 万' });
+  assert.strictEqual(s, '成员乙｜一年做到 1137 万');
+});
+
+t('briefOf 模型 brief 自带前缀时也截短', () => {
+  const s = llm.briefOf('effect', { person: '某某团队-成员乙', problem: 'x', result: 'y', brief: '某某团队-成员乙｜一年做到 1137 万' });
+  assert.strictEqual(s, '成员乙｜一年做到 1137 万');
+});
+
+t('briefOf 模型 brief 无分隔符时原样输出', () => {
+  const s = llm.briefOf('effect', { person: '成员乙', problem: 'x', result: 'y', brief: '睡不着三个月，现在能睡整觉' });
+  assert.strictEqual(s, '睡不着三个月，现在能睡整觉');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

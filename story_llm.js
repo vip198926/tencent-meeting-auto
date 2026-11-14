@@ -411,18 +411,42 @@ function validate(parsed, body, opts) {
  * 校验没过就用模板拼——模板只用已过校验的字段，绝不引入新信息。
  * 输出上限 40 字，避免一条概述把企微 2048 字节额度吃掉。
  */
+/**
+ * 显示层简称：说话人标签常带团队/店面/序号前缀（「某某团队-成员乙」「04 成员丙」），
+ * 群消息里读起来太长。这里只截短**显示用**的名字，
+ * 落库姓名、飞书章节名、台账一律不动 —— 那是归属依据，不能改。
+ */
+function shortName(raw) {
+  const origin = String(raw || '').replace(/\s+/g, ' ').trim();
+  if (!origin) return '';
+  let v = origin;
+  const parts = v.split(/[-－—–]/).map(x => x.trim()).filter(Boolean);
+  if (parts.length > 1) v = parts[parts.length - 1];
+  v = v.replace(/^\d{1,2}\s+/, '').trim();     // 「04 成员丙」→「成员丙」
+  return v.length >= 2 ? v : origin;            // 截没了就退回原值，不显示空名
+}
+
 function briefOf(kind, item) {
   if (!item) return '';
-  if (item.brief) return String(item.brief).slice(0, 40);
+  if (item.brief) return briefDisplay(item.brief);
+  const who = shortName(item.person);
   if (kind === 'effect') {
-    return `${item.person}｜${item.problem} → ${item.result}`.slice(0, 40);
+    return `${who}｜${item.problem} → ${item.result}`.slice(0, 40);
   }
   const first = (item.sections && item.sections[0] && item.sections[0].title) || '';
-  return `${item.person}｜${first}`.slice(0, 40);
+  return `${who}｜${first}`.slice(0, 40);
+}
+
+/** 模型给的 brief 形如「名字｜一句话」时，名字也走简称；没有分隔符就原样。 */
+function briefDisplay(raw) {
+  const s = String(raw || '').replace(/[\r\n\t]+/g, ' ').trim();
+  const m = s.match(/^([^｜|]{1,20})[｜|]([\s\S]*)$/);
+  if (!m) return s.slice(0, 40);
+  return `${shortName(m[1])}｜${String(m[2]).trim()}`.slice(0, 40);
 }
 
 module.exports = {
   PRODUCTS, REASON, transcriptBody, fingerprint, transcriptMinute,
   preselect, extractStories, validate, parseJsonLoose, setProductAliases,
-  parseSpeakerBlocks, locateQuote, attribute, briefOf,
+  parseSpeakerBlocks, locateQuote, attribute, briefOf, shortName,
 };
