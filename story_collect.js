@@ -22,12 +22,15 @@ const crypto = require('crypto');
 
 const lib = require('./story_lib');
 const llm = require('./story_llm');
+const layout = require('./story_layout');
+const normalize = require('./story_normalize');
 const { safeErr } = require('./log_safe');
 
 const STATE_FILE = process.env.STORY_STATE_FILE || path.join(__dirname, 'daily', 'story_state.json');
 const BATCH_FILE = process.env.STORY_BATCH_FILE || '';
 const RESULT_FILE = process.env.STORY_RESULT_FILE || '';
-const KB_ID = process.env.IMA_KB_ID || process.env.STORY_KB_ID || 'ima_kb_3nebCJv6';
+// 缺 env 就降级为不打标签；公开仓库里绝不写死知识库 ID。
+const KB_ID = process.env.IMA_KB_ID || process.env.STORY_KB_ID || '';
 const TAG_DONE = '故事已收';
 const TAG_NONE = '无故事';
 
@@ -50,7 +53,17 @@ function loadState() {
   return { version: 1, updated: '', seen: {}, pending: [], writes: [] };
 }
 
+/** 台账每轮被自动提交进 public 仓库，git 历史不可撤回：写入前硬断言。 */
+function assertSafeLedger(s) {
+  const txt = JSON.stringify(s);
+  if (/[\u4e00-\u9fa5]/.test(txt)) throw new Error('台账含中文，拒绝写入');
+  for (const k of Object.keys(s.seen || {})) {
+    if (!/^[a-f0-9]{7,}$/.test(k)) throw new Error('台账键格式异常，拒绝写入');
+  }
+}
+
 function saveState(s) {
+  assertSafeLedger(s);
   s.updated = new Date().toISOString();
   // 只保留最近 200 条写入记录，避免台账无限膨胀
   if (s.writes.length > 200) s.writes = s.writes.slice(-200);
@@ -102,32 +115,30 @@ function dedupeByMinute(items) {
   return { kept, dropped: items.length - kept.length };
 }
 
-// ---- 飞书块（v1：只追加，绝不 overwrite / 不改目录 / 不改条数）----
-function blocksForPeople(date, people) {
+// ---- 飞书块（只 insert / append，绝不 delete / overwrite 已有块）----
+/**
+ * 按写入规划生成块：
+ *   - 新建章节 → 先放章节标题（人物篇 heading1、效果篇 heading2），内容追加到文档末尾
+ *   - 插进已有章节 → 不带章节标题，内容插到该章节最后一个块之后
+ *   - 未署名条目只放逐字命中的原话与时间戳，绝不写任何人名
+ */
+function blocksForPlan(date, plan) {
   const blocks = [];
-  for (const p of people) {
-    blocks.push(lib.h2(`[自动追加 ${date}] ${p.person}`));
+  if (plan.isNew) blocks.push(plan.doc === 'people' ? lib.h1(plan.heading) : lib.h2(plan.heading));
+
+  for (const p of plan.people) {
+    blocks.push(lib.h2(`[${date}] ${p.person}`));
     p.sections.forEach(sec => {
       blocks.push(lib.h3(sec.title));
       sec.excerpts.forEach(ex => blocks.push(lib.textBlock(ex)));
     });
   }
-  return blocks;
-}
-
-function blocksForEffects(date, effects) {
-  const groups = new Map();
-  effects.forEach(e => {
-    if (!groups.has(e.product)) groups.set(e.product, []);
-    groups.get(e.product).push(e);
-  });
-  const blocks = [];
-  for (const [product, list] of groups) {
-    blocks.push(lib.h3(`[${date}] ${product}`));
-    for (const e of list) {
-      const speaker = e.speaker ? `\n（${e.speaker} 说）` : '';
-      blocks.push(lib.textBlock(`${e.person}｜${e.problem}｜${e.duration}｜${e.result}\n原话：「${e.quote}」${speaker}`));
-    }
+  for (const e of plan.effects) {
+    blocks.push(lib.textBlock(
+      `[${date}] ${e.person}｜${e.problem}｜${e.duration}｜${e.result}\n原话：「${e.quote}」${e.stamp ? '（' + e.stamp + '）' : ''}`));
+  }
+  for (const u of plan.unattributed) {
+    blocks.push(lib.textBlock(`[${date}]${u.stamp ? ' ' + u.stamp : ''} 原话：「${u.quote}」`));
   }
   return blocks;
 }
@@ -215,9 +226,40 @@ async function main() {
     return 0;
   }
 
-  const stats = { processed: 0, none: 0, effects: 0, people: 0, rejectedQuote: 0, rejectedOther: 0, failed: 0 };
+  // ⓪.5 转写错误对照表：本轮有稿才读，整轮只读一次、进程内共用。
+  // 读不到/格式异常一律降级为按原文标签判定，绝不阻断主管线。
+  let norm = null;
+  try {
+    norm = await normalize.load();
+    if (norm.ready) {
+      const s = norm.stats;
+      log(`对照表：人名映射 ${s.person} | 产品映射 ${s.product} | 严格名 ${s.strict} | 歧义弃用 ${s.ambiguous}`);
+      llm.setProductAliases(norm.productAliases);
+    } else {
+      log('对照表未配置（缺 STORY_ASR_NOTE_ID），按原文标签判定');
+    }
+  } catch (e) {
+    log('对照表读取失败，按原文标签判定：' + safeErr(e));
+    norm = null;
+  }
+
+  const stats = { processed: 0, none: 0, effects: 0, people: 0, rejectedQuote: 0, rejectedOther: 0, newChapters: 0, renamed: 0, failed: 0 };
   const productCount = {};
   const failedNow = [];
+
+  /** 每份稿处理前重读布局：上一份稿的插入会让 index 漂移，且刚新建的章节要能被下一份命中。 */
+  async function readLayouts() {
+    const out = {};
+    for (const [key, docId, types] of [
+      ['people', process.env.FEISHU_DOC_PEOPLE, [3]],   // 人物篇按 heading1 分章
+      ['effect', process.env.FEISHU_DOC_EFFECT, [4]],   // 效果篇按 heading2 分章
+    ]) {
+      const items = await lib.getDocumentBlocks(docId, token);
+      const lay = lib.documentLayout(items);
+      out[key] = { anchors: lib.sectionAnchors(lay, types), len: lay.children.length };
+    }
+    return out;
+  }
 
   for (const it of todo) {
     const fp = llm.fingerprint(it.text);
@@ -225,46 +267,51 @@ async function main() {
     try {
       const sel = llm.preselect(it.text);
       if (!sel.picked) {
-        if (rec.media_id) await lib.addTag(rec.media_id, TAG_NONE, KB_ID);
+        if (rec.media_id && KB_ID) await lib.addTag(rec.media_id, TAG_NONE, KB_ID);
         state.seen[fp] = { ts: rec.ts, stories: 0, media_id: rec.media_id };
         stats.none++;
         continue;
       }
 
       const parsed = await llm.extractStories(sel.picked);
-      const v = llm.validate(parsed, sel.body);
+      const v = llm.validate(parsed, sel.body, { norm });
       stats.rejectedQuote += v.rejected.quote;
       stats.rejectedOther += v.rejected.product + v.rejected.fields + v.rejected.duplicate;
+      stats.renamed += v.renamed || 0;
 
-      // 一份合格故事都没有：只打「无故事」标签，不写空索引、不碰两份正式文档
-      if (!v.effects.length && !v.people.length) {
-        if (rec.media_id) await lib.addTag(rec.media_id, TAG_NONE, KB_ID);
+      const total = v.effects.length + v.people.length + v.unclaimed.length;
+      if (!total) {                       // 一条可写内容都没有：不碰两份文档
+        if (rec.media_id && KB_ID) await lib.addTag(rec.media_id, TAG_NONE, KB_ID);
         state.seen[fp] = { ts: rec.ts, stories: 0, media_id: rec.media_id };
         stats.none++;
         continue;
       }
 
-      const pBlocks = blocksForPeople(date, v.people);
-      const eBlocks = blocksForEffects(date, v.effects);
+      const lays = await readLayouts();
+      const plans = layout.orderPlans(layout.planWrites({
+        people: v.people, effects: v.effects, unclaimed: v.unclaimed,
+        anchorsPeople: lays.people.anchors, anchorsEffect: lays.effect.anchors,
+        lenPeople: lays.people.len, lenEffect: lays.effect.len,
+      }));
       const writes = [];
-
-      if (pBlocks.length) {
-        const ids = await lib.appendInBatches(process.env.FEISHU_DOC_PEOPLE, token, pBlocks,
-          i => deterministicToken(fp, 'people', i));
-        writes.push({ doc: 'people', blocks: ids.length, fp });
+      for (const plan of plans) {
+        const blocks = blocksForPlan(date, plan);
+        if (!blocks.length) continue;
+        const docId = plan.doc === 'people' ? process.env.FEISHU_DOC_PEOPLE : process.env.FEISHU_DOC_EFFECT;
+        // 每个规划组必须独立幂等键，否则飞书会把第二批当成同一次请求吞掉
+        const key = `${plan.doc}|${plan.index}|${plan.chapter}`;
+        const tokenFn = i => deterministicToken(fp, key, i);
+        const ids = plan.mode === 'insert'
+          ? await lib.insertInBatches(docId, token, blocks, plan.index, tokenFn)
+          : await lib.appendInBatches(docId, token, blocks, tokenFn);
+        writes.push({ doc: plan.doc, blocks: ids.length, fp });
+        if (plan.isNew) stats.newChapters++;
       }
-      if (eBlocks.length) {
-        const ids = await lib.appendInBatches(process.env.FEISHU_DOC_EFFECT, token, eBlocks,
-          i => deterministicToken(fp, 'effect', i));
-        writes.push({ doc: 'effect', blocks: ids.length, fp });
-      }
 
-      // 飞书写入成功即视为主流程完成。IMA 笔记索引（appendNote）已移除：STORY_NOTE_ID
-      // 是用户在 ima 客户端建的笔记，API 身份非作者，写接口必报 210005 NOTE_NOT_OWNER
-      // （不可放开）；索引信息改存 story_state.json 的 writes 台账。
-      // 打「故事已收」标签：知识库 item 由 API 身份持有，可调；失败仅记日志不阻断主流程。
+      // 飞书写入成功即视为主流程完成。IMA 笔记索引已移除（210005 作者限制），
+      // 索引信息只存 story_state.json 的 writes 台账；打标签失败不阻断主流程。
       try {
-        if (rec.media_id) await lib.addTag(rec.media_id, TAG_DONE, KB_ID);
+        if (rec.media_id && KB_ID) await lib.addTag(rec.media_id, TAG_DONE, KB_ID);
       } catch (te) {
         log('打标签失败（不影响飞书落库）：' + safeErr(te));
       }
@@ -272,7 +319,7 @@ async function main() {
       v.effects.forEach(e => { productCount[e.product] = (productCount[e.product] || 0) + 1; });
       stats.effects += v.effects.length;
       stats.people += v.people.length;
-      state.seen[fp] = { ts: rec.ts, stories: v.effects.length + v.people.length, media_id: rec.media_id };
+      state.seen[fp] = { ts: rec.ts, stories: total, media_id: rec.media_id };
       state.writes.push({ ts: rec.ts, fp, docs: writes.map(w => w.doc), blocks: writes.reduce((a, w) => a + w.blocks, 0) });
       stats.processed++;
     } catch (e) {
@@ -286,12 +333,13 @@ async function main() {
 
   // 台账：本轮失败的项 + 重抓仍失败的旧项都保留，其余清掉
   state.pending = [...stillFailed, ...failedNow];
-  saveState(state);
+  try { saveState(state); }
+  catch (e) { log('台账写入被拒：' + safeErr(e) + '（本轮内容已由幂等键保护）'); }
 
   const products = Object.entries(productCount).map(([k, n]) => `${k} ${n}`).join('、') || '无';
-  log(`完成：处理 ${stats.processed} | 无故事 ${stats.none} | 效果 ${stats.effects} | 人物 ${stats.people} | 存疑丢弃 ${stats.rejectedQuote + stats.rejectedOther} | 失败 ${stats.failed}`);
+  log(`完成：处理 ${stats.processed} | 无故事 ${stats.none} | 效果 ${stats.effects} | 人物 ${stats.people} | 新建章节 ${stats.newChapters} | 错名纠正 ${stats.renamed} | 原话未命中丢弃 ${stats.rejectedQuote + stats.rejectedOther} | 失败 ${stats.failed}`);
   setResult(
-    `📖 收故事：处理 ${stats.processed} 份｜无故事 ${stats.none} 份｜新增效果故事 ${stats.effects} 条（${products}）、人物篇 ${stats.people} 篇｜失败 ${stats.failed} 份`,
+    `📖 收故事：处理 ${stats.processed} 份｜无故事 ${stats.none} 份｜新增效果故事 ${stats.effects} 条（${products}）、人物篇 ${stats.people} 篇｜新建章节 ${stats.newChapters} 个｜失败 ${stats.failed} 份`,
     stats);
 
   if (stats.processed || stats.failed) {

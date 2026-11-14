@@ -79,6 +79,18 @@ async function appendNote(noteId, content) {
   });
 }
 
+/**
+ * 读笔记正文（只读）。target_content_format=1 才是 Markdown；
+ * 传 0 会把整篇压成一行，表格结构全丢（实测过）。
+ * 内容只在进程内存里解析，绝不落盘、不进日志。
+ */
+async function getNoteContent(noteId) {
+  const data = await imaPost('/openapi/note/v1/get_doc_content', {
+    note_id: noteId, target_content_format: 1,
+  });
+  return typeof data.content === 'string' ? data.content : '';
+}
+
 // ---- 飞书 OpenAPI ----
 const FEISHU_BASE = 'https://open.feishu.cn/open-apis';
 
@@ -97,19 +109,29 @@ async function feishuToken() {
 // 任何字段为空或仅空白时填单空格，杜绝空块。
 const clean = c => { const s = String(c); return s.trim() ? s : ' '; };
 const textBlock = content => ({ block_type: 2, text: { elements: [{ text_run: { content: clean(content) } }] } });
+const h1 = content => ({ block_type: 3, heading1: { elements: [{ text_run: { content: clean(content) } }] } });
 const h2 = content => ({ block_type: 4, heading2: { elements: [{ text_run: { content: clean(content) } }] } });
 const h3 = content => ({ block_type: 5, heading3: { elements: [{ text_run: { content: clean(content) } }] } });
 
+/** 从块里取纯文字（只读，用于章节标题匹配）。文字只在进程内存，绝不落盘或进日志。 */
+function textOfBlock(b) {
+  if (!b) return '';
+  const holder = b.heading1 || b.heading2 || b.heading3 || b.heading4
+    || b.text || b.bullet || b.ordered || b.quote || null;
+  if (!holder || !Array.isArray(holder.elements)) return '';
+  return holder.elements.map(e => (e && e.text_run && e.text_run.content) || '').join('');
+}
+
 /**
- * 追加块到文档末尾（index:-1）。绝不 overwrite。返回新 block_id 列表用于回滚定位。
- * clientToken 用于幂等：同一批内容重试时飞书不会重复插入（避免半完成状态导致重复写入）。
+ * 追加/插入块。index=-1 追加到末尾；index>=0 插到 parent.children 的该下标之前。
+ * 绝不 overwrite / delete。clientToken 保证重试幂等。
  */
-async function appendBlocks(docId, token, children, clientToken) {
+async function appendBlocks(docId, token, children, clientToken, index = -1) {
   const id = encodeURIComponent(docId);
   let url = `${FEISHU_BASE}/docx/v1/documents/${id}/blocks/${id}/children?document_revision_id=-1`;
   if (clientToken) url += `&client_token=${encodeURIComponent(clientToken)}`;
   const { status, json } = await httpJson('POST', url, { Authorization: 'Bearer ' + token }, {
-    children, index: -1,
+    children, index,
   });
   if (json.code !== 0) throw new Error(`飞书追加 code=${json.code} http=${status}`);
   return ((json.data || {}).children || []).map(b => b.block_id).filter(Boolean);
@@ -127,11 +149,69 @@ async function appendInBatches(docId, token, blocks, tokenFn = null) {
   return ids;
 }
 
+/** 分页读取文档全部块（只读）。用于按已有章节标题定位插入点。 */
+async function getDocumentBlocks(docId, token) {
+  const id = encodeURIComponent(docId);
+  const items = [];
+  let pageToken = '', pages = 0;
+  while (pages < 15) {
+    const q = `?document_revision_id=-1&page_size=500${pageToken ? '&page_token=' + encodeURIComponent(pageToken) : ''}`;
+    const { status, json } = await httpJson('GET',
+      `${FEISHU_BASE}/docx/v1/documents/${id}/blocks${q}`,
+      { Authorization: 'Bearer ' + token });
+    if (json.code !== 0) throw new Error(`飞书读取 code=${json.code} http=${status}`);
+    const d = json.data || {};
+    items.push(...(d.items || []));
+    pages++;
+    pageToken = d.page_token || '';
+    if (!d.has_more || !pageToken) break;
+  }
+  return items;
+}
+
+/**
+ * 文档布局：根块 children 是 block_id 的有序数组，而 GET 的 items 是扁平遍历顺序
+ * （含嵌套块）。所以绝不能拿 items 下标当 index，必须按 children 建立同级顺序。
+ */
+function documentLayout(items) {
+  const root = items.find(b => b.block_type === 1);
+  const byId = new Map(items.map(b => [b.block_id, b]));
+  const children = (root && Array.isArray(root.children))
+    ? root.children.map(x => typeof x === 'string' ? x : ((x && (x.block_id || x.id)) || '')).filter(Boolean)
+    : [];
+  return { rootId: root ? root.block_id : '', children, byId };
+}
+
+/** 取指定层级标题在根 children 里的位置，作为章节锚点。 */
+function sectionAnchors(layout, headingTypes) {
+  const out = [];
+  layout.children.forEach((bid, idx) => {
+    const b = layout.byId.get(bid);
+    if (!b || !headingTypes.includes(b.block_type)) return;
+    out.push({ idx, blockId: bid, type: b.block_type, title: textOfBlock(b) });
+  });
+  return out;
+}
+
+/** 分批插入到指定位置；每批 8 块，后续批的 index 随已插入块数平移。 */
+async function insertInBatches(docId, token, blocks, startIndex, tokenFn = null) {
+  const ids = [];
+  let batch = 0;
+  for (let i = 0; i < blocks.length; i += 8) {
+    const ct = tokenFn ? tokenFn(batch++) : undefined;
+    ids.push(...await appendBlocks(docId, token, blocks.slice(i, i + 8), ct, startIndex + i));
+    if (i + 8 < blocks.length) await sleep(450);
+  }
+  return ids;
+}
+
 function bjDate() {
   return new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
 }
 
 module.exports = {
-  httpJson, sleep, imaPost, addTag, appendNote,
-  feishuToken, textBlock, h2, h3, appendBlocks, appendInBatches, bjDate,
+  httpJson, sleep, imaPost, addTag, appendNote, getNoteContent,
+  feishuToken, textBlock, h1, h2, h3, textOfBlock,
+  appendBlocks, appendInBatches, insertInBatches,
+  getDocumentBlocks, documentLayout, sectionAnchors, bjDate,
 };

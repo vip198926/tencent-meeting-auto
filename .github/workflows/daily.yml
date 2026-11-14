@@ -72,6 +72,7 @@ jobs:
           FEISHU_DOC_EFFECT: ${{ secrets.FEISHU_DOC_EFFECT }}
           STORY_NOTE_ID: ${{ secrets.STORY_NOTE_ID }}
           STORY_KB_ID: ${{ secrets.STORY_KB_ID }}
+          STORY_ASR_NOTE_ID: ${{ secrets.STORY_ASR_NOTE_ID }}
           STORY_BATCH_FILE: ${{ runner.temp }}/story_batch.jsonl
           STORY_RESULT_FILE: ${{ runner.temp }}/story_result.json
         run: node story_collect.js
