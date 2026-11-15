@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-11-14T05:14:59.906Z",
+  "updated": "2026-11-15T05:15:00.177Z",
   "seen": {
     "ed505f75e4e2": {
       "ts": "2026-11-08T19:36:33.454Z",
@@ -36,6 +36,11 @@
       "ts": "2026-11-14T05:14:41.517Z",
       "stories": 2,
       "media_id": "markdown_cls1_173ef1058496f6bbd069203c45f22ed0_cf458b57a1945d94efef61aa337e69197361581910354792"
+    },
+    "48ba97f21cd6": {
+      "ts": "2026-11-15T05:14:45.579Z",
+      "stories": 2,
+      "media_id": "markdown_cls1_173ef1058496f6bbd069203c45f22ed0_478ac4d51d53258b45e61decbfd41fae7361581910354792"
     }
   },
   "pending": [],
@@ -90,6 +95,15 @@
         "people"
       ],
       "blocks": 25
+    },
+    {
+      "ts": "2026-11-15T05:14:45.579Z",
+      "fp": "48ba97f21cd6",
+      "docs": [
+        "people",
+        "effect"
+      ],
+      "blocks": 22
     }
   ]
 }
