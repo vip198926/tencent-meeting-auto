@@ -356,15 +356,15 @@ async function main() {
   catch (e) { log('台账写入被拒：' + safeErr(e) + '（本轮内容已由幂等键保护）'); }
 
   const products = Object.entries(productCount).map(([k, n]) => `${k} ${n}`).join('、') || '无';
-  log(`完成：处理 ${stats.processed} | 无故事 ${stats.none} | 效果 ${stats.effects} | 人物 ${stats.people} | 新建章节 ${stats.newChapters} | 错名纠正 ${stats.renamed} | 概述弃用 ${stats.briefDrop} | 原话未命中丢弃 ${stats.rejectedQuote + stats.rejectedOther} | 失败 ${stats.failed}`);
+  log(`完成：有故事 ${stats.processed} | 无故事稿 ${stats.none} | 效果 ${stats.effects} | 人物 ${stats.people} | 新建章节 ${stats.newChapters} | 错名纠正 ${stats.renamed} | 概述弃用 ${stats.briefDrop} | 原话未命中丢弃 ${stats.rejectedQuote + stats.rejectedOther} | 失败 ${stats.failed}`);
   setResult(
-    `📖 收故事：处理 ${stats.processed} 份｜无故事 ${stats.none} 份｜新增效果故事 ${stats.effects} 条（${products}）、人物篇 ${stats.people} 篇｜新建章节 ${stats.newChapters} 个｜失败 ${stats.failed} 份`,
+    `📖 收故事：有故事 ${stats.processed} 份｜新增效果故事 ${stats.effects} 条（${products}）、人物篇 ${stats.people} 篇｜新建章节 ${stats.newChapters} 个｜失败 ${stats.failed} 份`,
     stats, details);
 
   if (stats.processed || stats.failed) {
     await notify([
       `收故事 · ${date}`,
-      `处理 ${stats.processed} 份｜无故事 ${stats.none} 份｜失败 ${stats.failed} 份`,
+      `有故事 ${stats.processed} 份｜无故事稿 ${stats.none} 份｜失败 ${stats.failed} 份`,
       `新增效果故事 ${stats.effects} 条（${products}）｜人物篇 ${stats.people} 篇`,
       `原话校验丢弃 ${stats.rejectedQuote} 条｜其他不合规 ${stats.rejectedOther} 条`,
       stats.failed ? '失败项未打标签，下轮自动重试。' : '',

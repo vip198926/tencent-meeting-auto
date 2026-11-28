@@ -15,7 +15,7 @@ function t(name, fn) {
 const base = {
   date: '2026-11-14', meetings: 2, ok: 2, fail: 0, skipped: 0, noRecord: 0,
   lines: Array.from({ length: 12 }, (_, i) => `| 10:0${i % 10} | 某会议 ${i} | 转写 | 成功 |`),
-  story: '📖 收故事：处理 1 份｜新增效果故事 1 条、人物篇 1 篇',
+  story: '📖 收故事：有故事 1 份｜新增效果故事 1 条、人物篇 1 篇',
 };
 const briefs = [
   '成员甲｜十年销售转自己开店，一年半 1137 万',
