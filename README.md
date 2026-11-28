@@ -256,8 +256,10 @@ GITHUB_PAT=<你的PAT> node set_secrets.js
 
 仓库 **Actions** → 选 workflow → **Run workflow**：
 
-- **每日管线** `daily.yml`：`mode=inc`（增量，默认）或 `mode=daily` + `date=YYYY-MM-DD`（按天补历史）。
+- **每日管线** `daily.yml`：`mode=inc`（增量，默认）或 `mode=daily` + `date=YYYY-MM-DD`（按天补历史）；`mode=link` + `links=会议回顾链接`（多个换行/逗号分隔）可**按指定链接抓取**——适合已知链接、但会议太老不在列表里的情况，逐条抓转写直传 IMA，不写 `daily/` 状态、不干扰增量去重。
 - **巡检补跑** `patrol.yml`：固定跑一轮增量，附带登录态剩余天数 / 积压预警。
+
+`mode=link` 的链接只在 workflow 内作环境变量传递，**不进 Actions 日志**（日志只打脱敏短哈希、段数与成功/失败）；IMA 笔记和企业微信日报里保留完整标题。失败逐条容错，不会中断其余链接；结果并入同一条日报推送。链接也走「收故事」步骤（有逐字稿时）。
 
 ### 本地运行
 
@@ -442,6 +444,7 @@ GITHUB_PAT=<你的PAT> node set_secrets.js     # 或只更新 CTM_AUTH_STATE_RAW
 ├── daily_records.js       # 增量/按天管线、会议拉取、选稿、去重、日报
 ├── ctm_fetch.js           # 抓取单条录制/转写 → 逐字稿 + AI 纪要
 ├── token_refresh.js       # 纯 HTTP 续期登录态
+├── batch_links.js         # mode=link：按指定会议链接抓取转写并上传 IMA（脱敏日志）
 ├── ima_upload.js          # 上传 Markdown 到 IMA 知识库
 ├── wecom_webhook.js       # 企业微信机器人推送
 ├── pushplus.js            # PushPlus 推送（可选备选通道）

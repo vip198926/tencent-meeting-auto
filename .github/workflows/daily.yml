@@ -8,11 +8,15 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'inc=增量（默认）/ daily=按天补跑'
+        description: 'inc=增量（默认）/ daily=按天补跑 / link=按指定链接抓取'
         required: false
         default: 'inc'
       date:
         description: 'daily 模式的日期 YYYY-MM-DD'
+        required: false
+        default: ''
+      links:
+        description: 'link 模式专用：会议回顾链接，多个用换行或逗号分隔'
         required: false
         default: ''
 
@@ -52,12 +56,17 @@ jobs:
       - name: 运行管线（续期登录态 -> 拉会 -> 转写 -> IMA -> 企业微信）
         env:
           CTM_REPORT_FILE: ${{ runner.temp }}/ctm_report.json
+          CTM_LINKS: ${{ github.event.inputs.links }}
         run: |
           MODE="${{ github.event.inputs.mode || 'inc' }}"
           DATE="${{ github.event.inputs.date }}"
           # 逐字稿交接文件只在 $RUNNER_TEMP，runner 结束即销毁，绝不进仓库
           export STORY_BATCH_FILE="$RUNNER_TEMP/story_batch.jsonl"
-          node run.js "$MODE" "$DATE"
+          if [ "$MODE" = "link" ]; then
+            node batch_links.js
+          else
+            node run.js "$MODE" "$DATE"
+          fi
 
       - name: 收故事（LLM 抽取 -> 飞书增量追加 -> IMA 标签）
         if: always()
